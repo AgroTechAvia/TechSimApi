@@ -1,0 +1,6 @@
+matplotlib==3.8.3
+msgpack_python==0.5.6
+msgpack_rpc_python==0.4.1
+numpy==2.0.1
+opencv_contrib_python==4.9.0.80
+opencv_python_headless==4.9.0.80
