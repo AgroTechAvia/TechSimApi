@@ -20,26 +20,22 @@ except:
     print("[INFO] Connect fail")
 
 
-fx = 1000.0  # фокусное расстояние по оси x
-fy = 1000.0  # фокусное расстояние по оси y
-cx = 640.0   # оптический центр по оси x
-cy = 480.0   # оптический центр по оси y
+fx = 1000.0  # focal length x
+fy = 1000.0  # focal length y
+cx = 640.0   # optical center x
+cy = 480.0   # optical center y
 
 # Создание матрицы камеры
 camera_matrix = np.array([[fx, 0, cx],
                           [0, fy, cy],
                           [0, 0, 1]], dtype=np.float32)
 
-k1 = 0.1  # радиальный коэффициент искажения
-k2 = 0.01  # второй радиальный коэффициент искажения
-p1 = 0.001  # первый тангенциальный коэффициент искажения
-p2 = 0.002  # второй тангенциальный коэффициент искажения
+k1 = 0.1  # first radial distortion coefficient
+k2 = 0.01  # second radial distortion coefficient
+p1 = 0.001  # first tan distortion coefficient 
+p2 = 0.002  # second tan distortion coefficient
 
-# Создание вектора коэффициентов искажения
 dist_coeffs = np.array([k1, k2, p1, p2, 0], dtype=np.float32)
-
-
-#raw_image = cv2.imread('test_frame.png', cv2.IMREAD_UNCHANGED)
 
 aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_ARUCO_ORIGINAL)
 
@@ -53,7 +49,7 @@ def detect_aruco_markers(frame,dict, parameters):
         rvecs, tvecs, _ = aruco.estimatePoseSingleMarkers(corners, 0.05, camera_matrix, dist_coeffs)
 
         for i in range(len(ids)):
-            # Нарисуйте оси координат у маркера
+
             frame = cv2.drawFrameAxes(frame, camera_matrix, dist_coeffs, rvecs[i], tvecs[i], 0.025)
 
             c = corners[i][0]
@@ -75,18 +71,12 @@ while isConnected:
     if rawImage != None:
         frame = cv2.imdecode(agrotechsimapi.string_to_uint8_array(rawImage), cv2.IMREAD_UNCHANGED)
 
-        
-        #resized_frame = resize_img(110,frame)
         frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2RGB)
-
-        '''h,w = gray_frame.shape 
-        print("h: {0}; w: {1}; ".format(h,w))'''
 
         acuro_frame = detect_aruco_markers(frame,aruco_dict, parameters)
         cv2.imshow("image", acuro_frame)
     
     key = cv2.waitKey(1) & 0xFF
     if (key == 27 or key == ord('q') or key == ord('x')):
-        
         break
 
