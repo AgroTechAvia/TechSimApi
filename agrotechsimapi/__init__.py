@@ -1,5 +1,2 @@
-from .client import *
-from .utils import *
-from .types import *
-
-__version__ = "1.8.1"
+from agrotechsimapi._version import __version__
+from agrotechsimapi.client import SimClient
