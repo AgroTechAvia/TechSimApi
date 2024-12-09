@@ -11,7 +11,9 @@ def main():
     while is_loop:  
         result = client.get_camera_capture(camera_id = 0, is_clear=True)
         
-        cv2.imshow(f"Capture from  camera", result)
+        if len(result) > 0:
+            cv2.imshow(f"Capture from  camera", result)
+            #print(result)
 
         if cv2.waitKey(1) == ord('q'):
             is_loop = False

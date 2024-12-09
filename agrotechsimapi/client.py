@@ -56,6 +56,15 @@ class SimClient():
 
         return image
 
+    def is_connected(self):
+                result = True
+                try:
+                    result = self.rpc_client.call('ping')
+                except:
+                    result = False
+
+                return result
+
     def get_camera_capture(self, camera_id: int = 0, is_clear: bool = True): 
 
         """
