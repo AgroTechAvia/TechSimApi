@@ -22,7 +22,6 @@ def plot_lidar_data(distances):
     plt.pause(0.1) 
 
 
-#python -m examples.laser_scan_example
 def main():
     is_show_plot = False
     is_loop = True
