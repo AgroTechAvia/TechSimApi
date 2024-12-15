@@ -2,7 +2,7 @@ from agrotechsimapi import SimClient
 import time
 import numpy as np
 
-#python -m examples.radar_point_example
+
 def main():
     is_loop = True
     client = SimClient(address="127.0.0.1", port=8080)

@@ -9,7 +9,7 @@ def main():
     client = SimClient(address = "127.0.0.1", port = 8080)
 
     while is_loop:  
-        result = client.get_camera_capture(camera_id = 0, is_clear = True, is_thermal = False)
+        result = client.get_camera_capture(camera_id = 0, is_clear = True, is_thermal = True)
         
         if  result is not None:
             if len(result) != 0:

@@ -3,7 +3,7 @@ import time
 import numpy as np
 
 
-#python -m examples.led_example
+
 def main():
     is_loop = True
     client = SimClient(address="127.0.0.1", port=8080)
