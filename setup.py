@@ -8,7 +8,6 @@ setup(
         "contourpy==1.3.1",
         "cycler==0.12.1",
         "fonttools==4.55.3",
-        "keyboard==0.13.5",
         "kiwisolver==1.4.7",
         "matplotlib==3.9.3",
         "msgpack-python==0.5.6",

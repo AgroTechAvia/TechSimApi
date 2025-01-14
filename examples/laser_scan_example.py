@@ -2,15 +2,16 @@ from agrotechsimapi import SimClient
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-import keyboard
+
+is_loop = True
 
 def plot_lidar_data(distances):
 
     angles = np.linspace(-np.pi, np.pi, num=len(distances), endpoint=False)
     
 
-    x = distances * -np.cos(angles)
-    y = distances * np.sin(angles)
+    x = distances * -np.cos(angles + np.pi/2)
+    y = distances * np.sin(angles + np.pi/2)
     
     plt.clf()  
     plt.scatter(x, y, s=5)  
@@ -21,26 +22,15 @@ def plot_lidar_data(distances):
     plt.grid(True)
     plt.pause(0.1) 
 
-
 def main():
-    is_show_plot = False
-    is_loop = True
     client = SimClient(address="127.0.0.1", port=8080)
 
     plt.figure()  
-
     while is_loop:
         result = client.get_laser_scan(angle_min=-np.pi, angle_max=np.pi, range_max=10, num_ranges=360, range_error=0.1)
-        
-        print(result)
-        if(keyboard.is_pressed("L")):
-            is_show_plot = not is_show_plot
-
-        if(is_show_plot):
-            plot_lidar_data(result)
-        else:
-            plt.close()
+        plot_lidar_data(result)
 
         time.sleep(1/15)
+    
 
 main()

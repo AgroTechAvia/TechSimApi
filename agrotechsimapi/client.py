@@ -65,7 +65,7 @@ class SimClient():
 
                 return result
 
-    def get_camera_capture(self, camera_id: int = 0, is_clear: bool = True, is_thermal: bool = False): 
+    def get_camera_capture(self, vehicle_id: int  = 1, camera_id: int = 0, is_clear: bool = True, is_thermal: bool = False): 
 
         """
         This function retrieves an image from one of the drone cameras in the simulator. 
@@ -81,7 +81,7 @@ class SimClient():
         Returns:
             ndarray : openCV image        
         """
-        raw_image = self.rpc_client.call('getCameraCapture', camera_id, is_thermal)
+        raw_image = self.rpc_client.call('getCameraCapture', vehicle_id, camera_id, is_thermal)
 
         if len(raw_image) > 0:
             cv2_image = np.frombuffer(bytes(raw_image), dtype=np.uint8).reshape((360, 480, 4))
