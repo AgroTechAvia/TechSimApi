@@ -65,7 +65,7 @@ class SimClient():
 
                 return result
 
-    def get_camera_capture(self, vehicle_id: int  = 1, camera_id: int = 0, is_clear: bool = True, is_thermal: bool = False): 
+    def get_camera_capture(self, camera_id: int = 0, is_clear: bool = True, is_thermal: bool = False): 
 
         """
         This function retrieves an image from one of the drone cameras in the simulator. 
