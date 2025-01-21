@@ -81,7 +81,7 @@ class SimClient():
         Returns:
             ndarray : openCV image        
         """
-        raw_image = self.rpc_client.call('getCameraCapture', vehicle_id, camera_id, is_thermal)
+        raw_image = self.rpc_client.call('getCameraCapture', camera_id, is_thermal)
 
         if len(raw_image) > 0:
             cv2_image = np.frombuffer(bytes(raw_image), dtype=np.uint8).reshape((360, 480, 4))
