@@ -14,6 +14,7 @@ setup(
         "msgpack-rpc-python==0.4.1",
         "numpy==1.26.4",
         "opencv-python==4.10.0.84",
+        "opencv-contrib-python==4.10.0.84",
         "packaging==24.2",
         "pillow==11.0.0",
         "pyparsing==3.2.0",
