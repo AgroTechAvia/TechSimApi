@@ -9,9 +9,8 @@ def main():
     while is_loop:  
         result = client.get_camera_capture(camera_id = 0, is_clear = True, is_thermal = False)
         
-        if  result is not None:
-            if len(result) != 0:
-                cv2.imshow(f"Capture from  camera", result)
+        if result is not None and len(result) != 0:
+            cv2.imshow("Capture from camera 1", result)
 
         if cv2.waitKey(1) == ord('q'):
             is_loop = False
