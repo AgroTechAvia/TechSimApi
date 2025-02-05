@@ -86,7 +86,7 @@ class SimClient():
         if len(raw_image) > 0:
             cv2_image = np.frombuffer(bytes(raw_image), dtype=np.uint8).reshape((360, 480, 4))
             result = post_process(cv2_image, 
-                                gamma=1.0, 
+                                gamma=1.8, 
                                 new_size=(640, 480), 
                                 saturation=1.05, 
                                 contrast=1)
@@ -241,6 +241,6 @@ class SimClient():
         self.rpc_client.call('setLedState', led_id, new_state)
 
     def get_kinametics_data(self):
-        
+
         return self.rpc_client.call("getKinematicsData")
 
