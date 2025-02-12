@@ -36,6 +36,10 @@ class SimClient():
                                             pack_encoding = 'utf-8', 
                                             unpack_encoding = 'utf-8')
         
+    def close_connection(self):
+        if(self.is_connected()):
+            self.rpc_client.close() 
+        
     def add_noise(self,image):
         noise = np.random.normal(0, 1, image.shape).astype(np.uint8)
         noisy_image = cv2.add(image, noise)
