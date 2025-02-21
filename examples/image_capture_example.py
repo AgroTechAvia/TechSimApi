@@ -7,7 +7,7 @@ def main():
     client = SimClient(address = "127.0.0.1", port = 8080)
 
     while is_loop:  
-        result = client.get_camera_capture(camera_id = 0, is_clear = True, is_thermal = False)
+        result = client.get_camera_capture(camera_id = 0, is_clear = True, is_thermal = False, is_depth = False)
         
         if result is not None and len(result) != 0:
             cv2.imshow("Capture from camera 1", result)

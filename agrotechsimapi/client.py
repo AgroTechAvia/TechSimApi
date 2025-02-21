@@ -72,7 +72,7 @@ class SimClient():
 
                 return result
 
-    def get_camera_capture(self, camera_id: int = 0, is_clear: bool = True, is_thermal: bool = False): 
+    def get_camera_capture(self, camera_id: int = 0, is_clear: bool = True, is_thermal: bool = False, is_depth: bool = False): 
 
         """
         This function retrieves an image from one of the drone cameras in the simulator. 
@@ -84,11 +84,12 @@ class SimClient():
             camera_id (int): id of camera
             is_clear(bool) : default True, if False is selected, noise will be generated
             is_thermal(bool) : default False, this flag activate thermal vision
+            is_depth(bool) : default False, this flag activate depth vision
 
         Returns:
             ndarray : openCV image        
         """
-        raw_image = self.rpc_client.call('getCameraCapture', camera_id, is_thermal)
+        raw_image = self.rpc_client.call('getCameraCapture', camera_id, is_thermal, is_depth)
 
         if len(raw_image) > 0:
             cv2_image = np.frombuffer(bytes(raw_image), dtype=np.uint8).reshape((360, 480, 4))
