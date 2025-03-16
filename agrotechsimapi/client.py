@@ -94,7 +94,7 @@ class SimClient():
         if len(raw_image) > 0:
             cv2_image = np.frombuffer(bytes(raw_image), dtype=np.uint8).reshape((360, 480, 4))
             result = post_process(cv2_image, 
-                                gamma=1.8, 
+                                gamma=1.0, 
                                 new_size=(640, 480), 
                                 saturation=1.05, 
                                 contrast=1)
