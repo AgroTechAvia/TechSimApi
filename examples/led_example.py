@@ -13,8 +13,10 @@ def main():
     while is_loop:
 
         client.set_led_state(led_id = 0,new_state = False)
+        client.set_led_state(led_id = 1,new_state = False)
         time.sleep(1/2)
         client.set_led_state(led_id = 0, new_state = True)
+        client.set_led_state(led_id = 1, new_state = True)
         time.sleep(1/2)
 
 main()

@@ -1,11 +1,12 @@
 from agrotechsimapi import SimClient
 import time
 import cv2
+import argparse
 
 from aruco_marker_recognizer import ArucoRecognizer
 from recognition_setting import aruco_dictionary, detector_parameters,marker_size,distance_coefficients,camera_matrix
 
-def main():
+def main(args):
 
     aruco_recognizer = ArucoRecognizer(aruco_dictionary = aruco_dictionary,
                                                 marker_size = marker_size,
@@ -17,7 +18,7 @@ def main():
     client = SimClient(address = "127.0.0.1", port = 8080)
 
     while is_loop:  
-        result = client.get_camera_capture(camera_id = 0, is_clear=True)
+        result = client.get_camera_capture(camera_id = args.camera_num, is_clear=True)
         
         if  result is not None:
             if len(result) != 0:
@@ -37,4 +38,8 @@ def main():
         time.sleep(1/20)
 
 
-main()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--camera_num', type=int, help='Camera number: 0(front)/1(bottom)/2(back)', default=0)
+    args = parser.parse_args()
+    main(args)

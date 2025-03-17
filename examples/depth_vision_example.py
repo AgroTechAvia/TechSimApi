@@ -8,10 +8,11 @@ def main(args):
     client = SimClient(address = "127.0.0.1", port = 8080)
 
     while is_loop:  
-        result = client.get_camera_capture(camera_id = args.camera_num, is_clear = True)
+        result = client.get_camera_capture(camera_id = args.camera_num, is_clear = True, is_depth=True)
         
-        if result is not None and len(result) != 0:
-            cv2.imshow("Capture from camera 1", result)
+        if  result is not None:
+            if len(result) != 0:
+                cv2.imshow(f"Capture from  camera", result)
 
         if cv2.waitKey(1) == ord('q'):
             is_loop = False

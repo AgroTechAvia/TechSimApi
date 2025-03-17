@@ -1,13 +1,14 @@
 from agrotechsimapi import SimClient
 import time
 import cv2
+import argparse
 
-def main():
+def main(args):
     is_loop = True
     client = SimClient(address = "127.0.0.1", port = 8080)
 
     while is_loop:  
-        result = client.get_camera_capture(camera_id = 0, is_clear = True, is_thermal = True)
+        result = client.get_camera_capture(camera_id = args.camera_num, is_clear = True, is_thermal = True)
         
         if  result is not None:
             if len(result) != 0:
@@ -20,4 +21,8 @@ def main():
         time.sleep(1/30)
 
 
-main()
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--camera_num', type=int, help='Camera number: 0(front)/1(bottom)/2(back)', default=0)
+    args = parser.parse_args()
+    main(args)
