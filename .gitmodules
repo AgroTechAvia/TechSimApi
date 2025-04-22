@@ -1,0 +1,3 @@
+[submodule "InavMSPApi"]
+	path = InavMSPApi
+	url = https://github.com/AgroTechAvia/InavMSPApi.git
