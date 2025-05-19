@@ -16,6 +16,7 @@ def plot_lidar_data(distances):
     plt.clf()  
     plt.scatter(x, y, s=5)  
     plt.ylim(-12, 12)  
+    plt.xlim(-12, 12) 
     plt.title("Lidar Scan Data")
     plt.xlabel("X (meters)")
     plt.ylabel("Y (meters)")
@@ -26,8 +27,12 @@ def main():
     client = SimClient(address="127.0.0.1", port=8080)
 
     plt.figure()  
+    plt.xlim(-11,11)
+    plt.ylim(-11,11)
+
+    
     while is_loop:
-        result = client.get_laser_scan(angle_min=-np.pi, angle_max=np.pi, range_max=10, num_ranges=360, range_error=0.1)
+        result = client.get_laser_scan(angle_min=-np.pi, angle_max=np.pi, range_max=10, num_ranges=360, range_error=0.1, is_clear=True)
         plot_lidar_data(result)
 
         time.sleep(1/15)

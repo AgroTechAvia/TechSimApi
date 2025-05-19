@@ -7,10 +7,8 @@ from pynput import keyboard
 import time
 import cv2
 import argparse
-
-from aruco_marker_recognizer import ArucoRecognizer
-from recognition_setting import aruco_dictionary, detector_parameters,marker_size,distance_coefficients,camera_matrix
-
+import numpy as np
+import matplotlib.pyplot as plt
 
 rc_control = [1500, 1500, 1000, 1500, 2000, 1000, 1000]
 is_control = True
@@ -27,7 +25,7 @@ def on_release(key):
 
         if key.char == 'q' or key.char == 'e':   
             rc_control[3] = 1500
-            
+
         if key.char == 'z' or key.char == 'x': 
             rc_control[2] = 1399
 
@@ -41,9 +39,9 @@ def on_press(key):
 
     try:
         if key.char == 'w':
+            
             rc_control[1] = 1900
             print(f'Increased Pitch control: {rc_control[1]}')
- 
         elif key.char == 's':
             rc_control[1] = 1100
             print(f'Decreased Pitch control: {rc_control[1]}')
@@ -55,11 +53,11 @@ def on_press(key):
         elif key.char == 'a':
             rc_control[0] = 1100
             print(f'Decreased Roll control: {rc_control[0]}')
- 
+  
         elif key.char == 'e':
             rc_control[3] = 1700
             print(f'Increased Yaw control: {rc_control[3]}')
-  
+   
         elif key.char == 'q':
             rc_control[3] = 1300
             print(f'Decreased Yaw control: {rc_control[3]}')
@@ -67,11 +65,11 @@ def on_press(key):
         elif key.char == 'x':
             rc_control[2] = 1490
             print(f'Increased Thortle control: {rc_control[2]}')
-
+            
         elif key.char == 'z':
             rc_control[2] = 1350
             print(f'Decreased Thortle control: {rc_control[2]}')
-
+            
         elif key.char == 'y':
             is_control = False
             print('Control disabled')
@@ -79,6 +77,24 @@ def on_press(key):
     except AttributeError:
         # Для специальных клавиш
         print(f'Special key {key} pressed')
+
+def plot_lidar_data(distances):
+
+    angles = np.linspace(-np.pi, np.pi, num=len(distances), endpoint=False)
+    
+
+    x = distances * -np.cos(angles + np.pi/2)
+    y = distances * np.sin(angles + np.pi/2)
+    
+    plt.clf()  
+    plt.scatter(x, y, s=5)  
+    plt.ylim(-12, 12)  
+    plt.xlim(-12, 12)  
+    plt.title("Lidar Scan Data")
+    plt.xlabel("X (meters)")
+    plt.ylabel("Y (meters)")
+    plt.grid(True)
+    plt.pause(0.1) 
 
 def main(args):
 
@@ -106,28 +122,20 @@ def main(args):
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
     listener.start()
 
-    aruco_recognizer = ArucoRecognizer(aruco_dictionary = aruco_dictionary,
-                                                marker_size = marker_size,
-                                                distance_coefficients = distance_coefficients,
-                                                detector_parameters = detector_parameters,
-                                                camera_matrix = camera_matrix)
-    
     is_loop = True
     client = SimClient(address = "127.0.0.1", port = 8080)
 
+    plt.figure()  
     while is_loop:  
-        result = client.get_camera_capture(camera_id = args.camera_num, is_clear=True)
-        
-        if  result is not None:
-            if len(result) != 0:
-                cv_image_with_markers, markers_ids, rotation_vectors, translation_vectors = aruco_recognizer.detect_aruco_markers(result)
+        image = client.get_camera_capture(camera_id = args.camera_num, is_clear=True)
 
-                if cv_image_with_markers is not None:
-                    if (cv_image_with_markers.shape[0] > 0) and (cv_image_with_markers.shape[1] > 0):
-                        result = cv_image_with_markers
-                        
-                cv2.imshow(f"Capture from  camera", result)
-        
+        if  image is not None:
+            if image is not None and len(image) != 0:
+                cv2.imshow("Capture from camera 1", image)
+
+        scan = client.get_laser_scan(angle_min=-np.pi, angle_max=np.pi, range_max=10, num_ranges=360, range_error=0.1)
+        plot_lidar_data(scan)
+
         if is_control:
             control.send_RAW_RC(rc_control)
             control.receive_msg()
@@ -138,7 +146,6 @@ def main(args):
             listener.stop()
 
         time.sleep(1/20)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
