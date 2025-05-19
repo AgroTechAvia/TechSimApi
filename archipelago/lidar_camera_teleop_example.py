@@ -35,7 +35,7 @@ def on_release(key):
 def on_press(key):
     global rc_control, is_control
 
-    print(f'Key pressed: {key}')  # Добавляем печать нажатой клавиши
+    print(f'Key pressed: {key}')  
 
     try:
         if key.char == 'w':
@@ -65,11 +65,11 @@ def on_press(key):
         elif key.char == 'x':
             rc_control[2] = 1490
             print(f'Increased Thortle control: {rc_control[2]}')
-            
+
         elif key.char == 'z':
             rc_control[2] = 1350
             print(f'Decreased Thortle control: {rc_control[2]}')
-            
+
         elif key.char == 'y':
             is_control = False
             print('Control disabled')

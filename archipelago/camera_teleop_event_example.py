@@ -33,7 +33,7 @@ def on_release(key):
 def on_press(key):
     global rc_control, is_control,client
 
-    print(f'Key pressed: {key}')  # Добавляем печать нажатой клавиши
+    print(f'Key pressed: {key}')  
 
     try:
         if key.char == 'w':
@@ -77,7 +77,7 @@ def on_press(key):
             print('Control disabled')
 
     except AttributeError:
-        # Для специальных клавиш
+        
         print(f'Special key {key} pressed')
 
 
