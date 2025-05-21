@@ -15,63 +15,44 @@ from recognition_setting import aruco_dictionary, detector_parameters,marker_siz
 rc_control = [1500, 1500, 1000, 1500, 2000, 1000, 1000]
 is_control = True
 
-def on_release(key):
-    global rc_control, is_control
-
-    try:
-        if key.char == 'w' or key.char == 's': 
-            rc_control[1] = 1500
-
-        if key.char == 'd' or key.char == 'a': 
-            rc_control[0] = 1500
-
-        if key.char == 'q' or key.char == 'e':   
-            rc_control[3] = 1500
-            
-        if key.char == 'z' or key.char == 'x': 
-            rc_control[2] = 1399
-
-    except AttributeError:
-        print(f'Special key {key} pressed')
-
 def on_press(key):
     global rc_control, is_control
 
-    print(f'Key pressed: {key}')  
+    print(f'Key pressed: {key}')  # Добавляем печать нажатой клавиши
 
     try:
         if key.char == 'w':
-            rc_control[1] = 1900
+            rc_control[1] = min(rc_control[1] + 5, 2000)
             print(f'Increased Pitch control: {rc_control[1]}')
- 
+
         elif key.char == 's':
-            rc_control[1] = 1100
+            rc_control[1] = max(rc_control[1] - 5, 1000)
             print(f'Decreased Pitch control: {rc_control[1]}')
- 
+
         elif key.char == 'd':
-            rc_control[0] = 1900
+            rc_control[0] = min(rc_control[0] + 5, 2000)
             print(f'Increased Roll control: {rc_control[0]}')
-  
+
         elif key.char == 'a':
-            rc_control[0] = 1100
+            rc_control[0] = max(rc_control[0] - 5, 1000)
             print(f'Decreased Roll control: {rc_control[0]}')
- 
+
         elif key.char == 'e':
-            rc_control[3] = 1700
+            rc_control[3] = min(rc_control[3] + 5, 2000)
             print(f'Increased Yaw control: {rc_control[3]}')
-  
+            
         elif key.char == 'q':
-            rc_control[3] = 1300
+            rc_control[3] = max(rc_control[3] - 5, 1000)
             print(f'Decreased Yaw control: {rc_control[3]}')
-   
+
         elif key.char == 'x':
-            rc_control[2] = 1490
+            rc_control[2] = min(rc_control[2] + 5, 2000)
             print(f'Increased Thortle control: {rc_control[2]}')
 
         elif key.char == 'z':
-            rc_control[2] = 1350
+            rc_control[2] = max(rc_control[2] - 5, 1000)
             print(f'Decreased Thortle control: {rc_control[2]}')
-
+            
         elif key.char == 'y':
             is_control = False
             print('Control disabled')
@@ -103,7 +84,7 @@ def main(args):
     control.send_RAW_RC([100, 1000, 1000, 1000, 2000, 1000, 1000])
     control.receive_msg()
 
-    listener = keyboard.Listener(on_press=on_press, on_release=on_release)
+    listener = keyboard.Listener(on_press=on_press)
     listener.start()
 
     aruco_recognizer = ArucoRecognizer(aruco_dictionary = aruco_dictionary,
