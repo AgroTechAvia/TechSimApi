@@ -17,7 +17,7 @@ is_can_shoot = True
 def on_press(key):
     global rc_control, is_control, client
 
-    print(f'Key pressed: {key}')  # Добавляем печать нажатой клавиши
+    print(f'Key pressed: {key}') 
 
     try:
         if key.char == 'w':
@@ -57,8 +57,7 @@ def on_press(key):
             print('Control disabled')
 
         elif key.char == 'i':
-            
-            print(client.call_event_action())
+            print(f'Event action = {client.call_event_action()}')
                 
 
     except AttributeError:
