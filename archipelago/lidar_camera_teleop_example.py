@@ -76,7 +76,7 @@ def plot_lidar_data(distances):
     plt.xlabel("X (meters)")
     plt.ylabel("Y (meters)")
     plt.grid(True)
-    plt.pause(0.1) 
+    #plt.pause(0.1) 
 
 def main(args):
 

@@ -27,8 +27,8 @@ def main():
     client = SimClient(address="127.0.0.1", port=8080)
 
     plt.figure()  
-    plt.xlim(-11,11)
-    plt.ylim(-11,11)
+    plt.xlim(-12,12)
+    plt.ylim(-12,12)
 
     
     while is_loop:
