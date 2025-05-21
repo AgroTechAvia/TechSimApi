@@ -252,6 +252,6 @@ class SimClient():
 
         return self.rpc_client.call("getKinematicsData")
     
-    def call_custom_event(self):
-        return self.rpc_client.call("callCustomEvent")
+    def call_event_action(self):
+        return self.rpc_client.call("callEventAction")
 

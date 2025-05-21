@@ -70,7 +70,7 @@ def on_press(key):
 
         elif key.char == 'i':
             if client != None:
-                client.call_custom_event()
+                client.call_event_action()
             
         elif key.char == 'y':
             is_control = False
