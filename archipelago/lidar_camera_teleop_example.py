@@ -17,7 +17,7 @@ is_control = True
 def on_press(key):
     global rc_control, is_control
 
-    print(f'Key pressed: {key}')  # Добавляем печать нажатой клавиши
+    print(f'Key pressed: {key}')  
 
     try:
         if key.char == 'w':
@@ -76,7 +76,6 @@ def plot_lidar_data(distances):
     plt.xlabel("X (meters)")
     plt.ylabel("Y (meters)")
     plt.grid(True)
-    #plt.pause(0.1) 
 
 def main(args):
 
@@ -107,7 +106,8 @@ def main(args):
     is_loop = True
     client = SimClient(address = "127.0.0.1", port = 8080)
 
-    plt.figure()  
+    plt.figure()
+      
     while is_loop:  
         image = client.get_camera_capture(camera_id = args.camera_num, is_clear=True)
 

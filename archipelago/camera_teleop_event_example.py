@@ -12,6 +12,8 @@ rc_control = [1500, 1500, 1000, 1500, 2000, 1000, 1000]
 is_control = True
 client = None
 
+is_can_shoot = True
+
 def on_press(key):
     global rc_control, is_control, client
 
@@ -55,8 +57,9 @@ def on_press(key):
             print('Control disabled')
 
         elif key.char == 'i':
-            if client != None:
-                client.call_event_action()
+            
+            print(client.call_event_action())
+                
 
     except AttributeError:
         
@@ -93,6 +96,7 @@ def main(args):
     client = SimClient(address = "127.0.0.1", port = 8080)
 
     while is_loop:  
+        is_can_shoot = True
         image = client.get_camera_capture(camera_id = args.camera_num, is_clear=True)
 
         if  image is not None:
