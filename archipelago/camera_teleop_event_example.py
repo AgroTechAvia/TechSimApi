@@ -13,7 +13,7 @@ is_control = True
 client = None
 
 def on_press(key):
-    global rc_control, is_control
+    global rc_control, is_control, client
 
     print(f'Key pressed: {key}')  # Добавляем печать нажатой клавиши
 
@@ -53,6 +53,10 @@ def on_press(key):
         elif key.char == 'y':
             is_control = False
             print('Control disabled')
+
+        elif key.char == 'i':
+            if client != None:
+                client.call_event_action()
 
     except AttributeError:
         
