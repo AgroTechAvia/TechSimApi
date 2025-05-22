@@ -71,6 +71,7 @@ def main():
         main_req_file = os.path.join(main_project_dir, "requirements.txt")
         if os.path.isfile(main_req_file):
             run_command("pip install -r requirements.txt", cwd=main_project_dir)
+            run_command("pip install tornado backports.ssl_match_hostname", cwd=main_project_dir)
         else:
             print(f"Предупреждение: файл {main_req_file} не найден, пропускаем установку зависимостей основного проекта")
         
