@@ -1,17 +1,21 @@
 import subprocess
 import argparse
 import sys
-    
+from pathlib import Path
+
 def main(args):
 
-    camera_process = subprocess.Popen([sys.executable, "archipelago\modules\camera_driver.py", 
-    "--frequency", str(args.camera_frequency)])
+    camera_path = Path("archipelago/modules/camera_driver.py")
+    input_path = Path("archipelago/modules/input_driver.py")
     
-    teleop_process =  subprocess.Popen([sys.executable, "archipelago\modules\input_driver.py", 
-    "--frequency", str(args.camera_frequency), 
-    "--is_action", "False",
-    "--inav_host", args.inav_host,
-    "--inav_port", str(args.inav_port)])
+    camera_process = subprocess.Popen([sys.executable, str(camera_path), 
+                                       "--frequency", str(args.camera_frequency)])
+    
+    teleop_process = subprocess.Popen([sys.executable, str(input_path), 
+                                       "--frequency", str(args.camera_frequency), 
+                                       "--is_action", "False",
+                                       "--inav_host", args.inav_host,
+                                       "--inav_port", str(args.inav_port)])
 
     camera_process.wait()
     teleop_process.wait()

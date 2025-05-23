@@ -1,20 +1,27 @@
 import subprocess
 import argparse
 import sys
-    
-def main(args):
-    lidar_process = subprocess.Popen([sys.executable, "archipelago\modules\lidar_driver.py", 
-    "--frequency", str(args.lidar_frequency), 
-    "--is_clear", str(args.lidar_clear)])
+from pathlib import Path
 
-    camera_process = subprocess.Popen([sys.executable, "archipelago\modules\camera_driver.py", 
-    "--frequency", str(args.camera_frequency)])
+def main(args):
+
+    lidar_path = Path("archipelago/modules/lidar_driver.py")
+    camera_path = Path("archipelago/modules/camera_driver.py")
+    input_path = Path("archipelago/modules/input_driver.py")
     
-    teleop_process =  subprocess.Popen([sys.executable, "archipelago\modules\input_driver.py", 
-    "--frequency", str(args.camera_frequency), 
-    "--is_action", "False",
-    "--inav_host", args.inav_host,
-    "--inav_port", str(args.inav_port)])
+
+    lidar_process = subprocess.Popen([sys.executable, str(lidar_path), 
+                                      "--frequency", str(args.lidar_frequency), 
+                                      "--is_clear", str(args.lidar_clear)])
+
+    camera_process = subprocess.Popen([sys.executable, str(camera_path), 
+                                       "--frequency", str(args.camera_frequency)])
+    
+    teleop_process = subprocess.Popen([sys.executable, str(input_path), 
+                                       "--frequency", str(args.camera_frequency), 
+                                       "--is_action", "False",
+                                       "--inav_host", args.inav_host,
+                                       "--inav_port", str(args.inav_port)])
 
     lidar_process.wait()
     camera_process.wait()
