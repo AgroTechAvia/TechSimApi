@@ -5,6 +5,8 @@ import argparse
 from agrotechsimapi import SimClient
 
 
+plt.ion() 
+
 def plot_lidar_data(distances):
 
     angles = np.linspace(-np.pi, np.pi, num=len(distances), endpoint=False)

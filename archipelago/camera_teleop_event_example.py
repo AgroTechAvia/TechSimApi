@@ -3,6 +3,8 @@ import argparse
 import sys
 from pathlib import Path
 
+
+
 def main(args):
 
     camera_path = Path("archipelago","modules","camera_driver.py")

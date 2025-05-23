@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 
 is_loop = True
 
+plt.ion() 
+
 def plot_lidar_data(distances):
 
     angles = np.linspace(-np.pi, np.pi, num=len(distances), endpoint=False)
