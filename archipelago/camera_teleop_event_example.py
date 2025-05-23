@@ -5,8 +5,8 @@ from pathlib import Path
 
 def main(args):
 
-    camera_path = Path("archipelago/modules/camera_driver.py")
-    input_path = Path("archipelago/modules/input_driver.py")
+    camera_path = Path("archipelago","modules","camera_driver.py")
+    input_path = Path("archipelago","modules","input_driver.py")
     
     camera_process = subprocess.Popen([sys.executable, str(camera_path), 
                                        "--frequency", str(args.camera_frequency)])

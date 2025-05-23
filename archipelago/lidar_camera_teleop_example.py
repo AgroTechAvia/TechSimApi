@@ -5,9 +5,9 @@ from pathlib import Path
 
 def main(args):
 
-    lidar_path = Path("archipelago/modules/lidar_driver.py")
-    camera_path = Path("archipelago/modules/camera_driver.py")
-    input_path = Path("archipelago/modules/input_driver.py")
+    lidar_path = Path("archipelago","modules","lidar_driver.py")
+    camera_path = Path("archipelago","modules","camera_driver.py")
+    input_path = Path("archipelago","modules","input_driver.py")
     
 
     lidar_process = subprocess.Popen([sys.executable, str(lidar_path), 
