@@ -69,6 +69,14 @@ def on_press(key):
         
         print(f'Special key {key} pressed')
 
+def cleanup(control, listener):
+    
+    print("\n[Teleop] Shutting down teleop module...")
+
+    control.send_RAW_RC([1500, 1500, 1000, 1500, 2000, 1000, 1000])
+    control.receive_msg()
+
+    listener.stop()
 
 def main(args):
     is_loop = True
@@ -103,11 +111,15 @@ def main(args):
 
     
 
-    while is_loop:  
-        control.send_RAW_RC(rc_control)
-        control.receive_msg()
-
-        time.sleep(1/frequency_)
+    try:
+        while True:  
+            control.send_RAW_RC(rc_control)
+            control.receive_msg()
+            time.sleep(1/frequency_)
+    except KeyboardInterrupt:
+        pass  
+    finally:
+        cleanup(control, listener)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

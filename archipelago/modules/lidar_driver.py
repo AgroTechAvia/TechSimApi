@@ -3,12 +3,11 @@ import matplotlib.pyplot as plt
 import time
 import argparse
 from agrotechsimapi import SimClient
-
+import sys
 
 plt.ion() 
 
 def plot_lidar_data(distances):
-
     angles = np.linspace(-np.pi, np.pi, num=len(distances), endpoint=False)
     
     x = distances * -np.cos(angles + np.pi/2)
@@ -24,21 +23,29 @@ def plot_lidar_data(distances):
     plt.grid(True)
     plt.pause(0.1) 
 
-def main(args):
-    is_loop = True
+def cleanup(fig):
+    print("\n[Lidar] Shutting down lidar module..")
+    plt.close(fig)
 
+def main(args):
     frequency_ = args.frequency
     is_clear_ = True if args.is_clear == 'True' else False
 
     client = SimClient(address="127.0.0.1", port=8080)
+    fig = plt.figure()
 
-    plt.figure()
-
-    while is_loop:
-        scan = client.get_laser_scan(angle_min=-np.pi, angle_max=np.pi, range_max=10, num_ranges=360, range_error=0.1, is_clear = is_clear_)
-        plot_lidar_data(scan)
-
-        time.sleep(1/frequency_)
+    try:
+        while True:
+            scan = client.get_laser_scan(angle_min=-np.pi, angle_max=np.pi, 
+                                       range_max=10, num_ranges=360, 
+                                       range_error=0.1, is_clear=is_clear_)
+            plot_lidar_data(scan)
+            time.sleep(1/frequency_)
+            
+    except KeyboardInterrupt:
+        pass  
+    finally:
+        cleanup(fig)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -47,3 +54,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(args)
+    
