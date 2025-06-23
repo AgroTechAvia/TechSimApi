@@ -3,27 +3,52 @@ import cv2
 import numpy as np
 import random
 
+import asyncio
+import threading
+import grpc
+from . import video_pb2
+from . import video_pb2_grpc
+
 def post_process(image, gamma=1.0, new_size=(800, 600), saturation=1.0, contrast=1.0):
     inv_gamma = 1.0 / gamma
     table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in range(256)]).astype("uint8")
 
     image = cv2.LUT(image, table)
 
-        # Меняем разрешение изображения
     if new_size is not None:
         image = cv2.resize(image, new_size, interpolation=cv2.INTER_LINEAR)
     
-
-    # Меняем контраст
     image = cv2.convertScaleAbs(image, alpha=contrast, beta=0)
 
-    # Меняем насыщенность
     if saturation != 1.0:
         img_hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         img_hsv[:, :, 1] = np.clip(img_hsv[:, :, 1] * saturation, 0, 255).astype(np.uint8)
         image = cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR)
 
     return image
+
+class VideoStreamSender:
+    def __init__(self, camera_id=0, rate=30):
+        self.client = SimClient()
+        self.camera_id = camera_id
+        self.streaming = False
+        self.rate = rate
+
+    async def generate_frames(self):
+        while self.streaming:
+            frame = self.client.get_camera_capture(camera_id=self.camera_id, is_clear=True)
+            if frame is not None:
+                _, buffer = cv2.imencode('.jpg', frame)
+                yield video_pb2.Frame(data=buffer.tobytes(), encoding="jpeg")
+            await asyncio.sleep(1 / self.rate)
+
+    async def stream(self, port):
+        async with grpc.aio.insecure_channel(f"localhost:{port}") as channel:
+            stub = video_pb2_grpc.VideoStreamServiceStub(channel)
+            await stub.StreamFrames(self.generate_frames())
+
+sender_instance = None
+thread_instance = None
 
 class SimClient():
     def __init__(self, 
@@ -35,6 +60,8 @@ class SimClient():
                                             timeout = 10, 
                                             pack_encoding = 'utf-8', 
                                             unpack_encoding = 'utf-8')
+
+        self.streaming = False
     
     def __del__(self):
         self.close_connection()
@@ -252,3 +279,29 @@ class SimClient():
 
         return self.rpc_client.call("getKinematicsData")
 
+
+    def start_streaming(self, port: int, camera_id: int = 0, rate: int = 30):
+        global sender_instance, thread_instance
+
+        if sender_instance is not None and sender_instance.streaming:
+            print("[INFO] Streaming already running")
+            return
+
+        sender_instance = VideoStreamSender(camera_id,rate)
+        sender_instance.streaming = True
+        
+
+        def run_async():
+            asyncio.run(sender_instance.stream(port))
+
+        thread_instance = threading.Thread(target=run_async, daemon=True)
+        thread_instance.start()
+        print(f"[INFO] Started streaming to port {port}")
+
+    def stop_streaming(self):
+        global sender_instance
+        if sender_instance:
+            sender_instance.streaming = False
+            print("[INFO] Stopped streaming")
+        else:
+            print("[WARN] No active streaming session")

@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+service VideoStreamService {
+rpc StreamFrames(stream Frame) returns (Response);
+}
+
+message Frame {
+bytes data = 1;
+string encoding = 2; // "jpeg"
+}
+
+message Response {
+string status = 1;
+}
