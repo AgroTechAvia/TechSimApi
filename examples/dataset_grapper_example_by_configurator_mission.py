@@ -27,7 +27,6 @@ def main(folder_name, capture_frequency, image_prefix, max_images, camera_num):
     tcp_transmitter.connect()
     control = MultirotorControl(tcp_transmitter)
 
-
     folder = create_unique_folder(folder_name)
     print(f"Created folder: {folder}")
 
@@ -37,7 +36,7 @@ def main(folder_name, capture_frequency, image_prefix, max_images, camera_num):
     control.send_RAW_RC([1000, 1000, 1000, 1000, 1000, 1000, 1000])
     control.receive_msg()
     time.sleep(0.5)
-
+    
     control.send_RAW_RC([100, 1000, 1000, 1000, 2000, 1000, 1000])
     control.receive_msg()
     time.sleep(0.1)
@@ -45,9 +44,10 @@ def main(folder_name, capture_frequency, image_prefix, max_images, camera_num):
     control.send_RAW_RC([1500, 1450, 1400, 1500, 2000, 1000, 1000])
     control.receive_msg()
     time.sleep(5)
-
+    
     control.send_RAW_RC([1500, 1500, 1400, 1500, 2000, 1000, 2000])
     time.sleep(0.5)
+
 
     while image_count < max_images:
         try:
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_images', type=int, default=100, help='Maximum number of images')
     parser.add_argument('--camera_num', type=int, default=1, help='Camera number: 0(front)/1(bottom)/2(back)')
     parser.add_argument('--inav_host', type=str, default='127.0.0.1')
-    parser.add_argument('--inav_port', type=int, default=5760)
+    parser.add_argument('--inav_port', type=int, default=5762)
     
     args = parser.parse_args()
     

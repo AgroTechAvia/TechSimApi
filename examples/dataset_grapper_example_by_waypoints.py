@@ -87,7 +87,7 @@ if __name__ == "__main__":
     parser.add_argument('--max_images', type=int, default=100, help='Maximum number of images')
     parser.add_argument('--camera_num', type=int, default=1, help='Camera number: 0(front)/1(bottom)/2(back)')
     parser.add_argument('--inav_host', type=str, default='127.0.0.1')
-    parser.add_argument('--inav_port', type=int, default=5760)
+    parser.add_argument('--inav_port', type=int, default=5762)
     
     args = parser.parse_args()
     
