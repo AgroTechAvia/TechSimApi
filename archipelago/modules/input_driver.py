@@ -103,7 +103,7 @@ def main(args):
     control.receive_msg()
     time.sleep(0.5)
 
-    control.send_RAW_RC([100, 1000, 1000, 1000, 2000, 1000, 1000])
+    control.send_RAW_RC([1000, 1000, 1000, 1000, 2000, 1000, 1000])
     control.receive_msg()
 
     listener = keyboard.Listener(on_press=on_press)

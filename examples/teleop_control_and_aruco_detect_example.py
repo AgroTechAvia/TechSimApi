@@ -15,8 +15,10 @@ from recognition_setting import aruco_dictionary, detector_parameters,marker_siz
 rc_control = [1500, 1500, 1000, 1500, 2000, 1000, 1000]
 is_control = True
 
+client = None
+
 def on_press(key):
-    global rc_control, is_control
+    global rc_control, is_control, client
 
     print(f'Key pressed: {key}')  # Добавляем печать нажатой клавиши
 
@@ -52,6 +54,8 @@ def on_press(key):
         elif key.char == 'z':
             rc_control[2] = max(rc_control[2] - 5, 1000)
             print(f'Decreased Thortle control: {rc_control[2]}')
+        elif key.char == 'i':
+                print(f'Event action = {client.call_event_action()}')
             
         elif key.char == 'y':
             is_control = False
@@ -71,7 +75,7 @@ def main(args):
     tcp_transmitter.connect()
     control = MultirotorControl(tcp_transmitter)
 
-    global rc_control, is_control
+    global rc_control, is_control, client
 
     print("Z/X Thortle \nQ/E Yaw \nW/S Pitch \nA/D Roll")
 
