@@ -12,7 +12,7 @@ def cleanup(camera_num):
 def main(args):
     frequency_ = args.frequency
     camera_num_ = args.camera_num
-
+    
     client = SimClient(address="127.0.0.1", port=8080)
     window_name = f"Capture from camera {camera_num_}"
 
