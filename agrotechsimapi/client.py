@@ -278,6 +278,12 @@ class SimClient():
     def get_kinametics_data(self):
 
         return self.rpc_client.call("getKinematicsData")
+    
+    def call_event_action(self):
+        try:
+            return self.rpc_client.call("callEventAction")
+        except:
+            return False
 
 
     def start_streaming(self, port: int, camera_id: int = 0, rate: int = 30):
