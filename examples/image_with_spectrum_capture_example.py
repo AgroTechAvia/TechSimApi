@@ -1,4 +1,4 @@
-from agrotechsimapi import SimClient
+from agrotechsimapi import SimClient, CaptureType
 import time
 import cv2
 import argparse
@@ -7,14 +7,15 @@ import os
 def main(args):
     is_loop = True
     client = SimClient(address="127.0.0.1", port=8080)
-    parameter = 0  
+    parameter = 4  
     output_dir = "saved_frames"
     
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     while is_loop:
-        result = client.get_camera_capture_new(camera_id = args.camera_num, pp_index = 3 , parameter=parameter)
+        
+        result = client.get_camera_capture(camera_id=args.camera_num, type=CaptureType(parameter))
         
         if result is not None and len(result) != 0:
             cv2.imshow("Capture from camera 1", result)
@@ -22,9 +23,11 @@ def main(args):
             filename = os.path.join(output_dir, f"frame_param_{parameter}.png")
             cv2.imwrite(filename, result)
             print(f"Saved image with param {parameter} with name {filename}")
-            parameter = parameter + 1
-            if parameter > 6:
-                parameter = 0
+            
+            
+            parameter += 1
+            if parameter > 9:  
+                parameter = 4
 
         time.sleep(0.05)
 

@@ -2,12 +2,25 @@ import msgpackrpc
 import cv2
 import numpy as np
 import random
+from enum import Enum
 
 import asyncio
 import threading
 import grpc
 from . import video_pb2
 from . import video_pb2_grpc
+
+class CaptureType(Enum):
+    color = 0
+    thermal = 1
+    depth = 2
+    spectrum_color = 3 
+    spectrum_NIR = 4
+    spectrum_SWIR = 5
+    spectrum_RE = 6
+    spectrum_R = 7
+    spectrum_G = 8
+    spectrum_B = 9
 
 def post_process(image, gamma=1.0, new_size=(800, 600), saturation=1.0, contrast=1.0):
     inv_gamma = 1.0 / gamma
@@ -99,7 +112,7 @@ class SimClient():
 
                 return result
 
-    def get_camera_capture(self, camera_id: int = 0, is_clear: bool = True, is_thermal: bool = False, is_depth: bool = False): 
+    '''def get_camera_capture(self, camera_id: int = 0, is_clear: bool = True, is_thermal: bool = False, is_depth: bool = False): 
 
         """
         This function retrieves an image from one of the drone cameras in the simulator. 
@@ -129,7 +142,7 @@ class SimClient():
             if not is_clear:
                 result = self.add_noise(result) 
                 result = self.add_artifacts(result)  
-            return result
+            return result'''
 
     def get_laser_scan(self, 
                        angle_min : float = -np.pi/2, 
@@ -312,7 +325,41 @@ class SimClient():
         else:
             print("[WARN] No active streaming session")
 
-    def get_camera_capture_new(self, camera_id: int = 0, pp_index: int = 0, parameter: float = 0):
+    def get_camera_capture(self, camera_id: int = 0, type: CaptureType = CaptureType.color):
+
+        pp_index = 0
+        parameter = 0
+
+        if(type == CaptureType.color):
+            pp_index = 0
+            parameter = 0
+        elif(type == CaptureType.thermal):
+            pp_index = 1
+            parameter = 0
+        elif(type == CaptureType.depth):
+            pp_index = 2
+            parameter = 0
+        elif(type == CaptureType.spectrum_color):
+            pp_index = 3
+            parameter = 0
+        elif(type == CaptureType.spectrum_NIR):
+            pp_index = 3
+            parameter = 1
+        elif(type == CaptureType.spectrum_SWIR):
+            pp_index = 3
+            parameter = 2
+        elif(type == CaptureType.spectrum_RE):
+            pp_index = 3
+            parameter = 3
+        elif(type == CaptureType.spectrum_R):
+            pp_index = 3
+            parameter = 4
+        elif(type == CaptureType.spectrum_G):
+            pp_index = 3
+            parameter = 5
+        elif(type == CaptureType.spectrum_B):
+            pp_index = 3
+            parameter = 6
 
         raw_image = self.rpc_client.call('getCameraCapture', camera_id, pp_index, parameter)
 
