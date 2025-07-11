@@ -311,3 +311,18 @@ class SimClient():
             print("[INFO] Stopped streaming")
         else:
             print("[WARN] No active streaming session")
+
+    def get_camera_capture_new(self, camera_id: int = 0, pp_index: int = 0, parameter: float = 0):
+
+        raw_image = self.rpc_client.call('getCameraCapture', camera_id, pp_index, parameter)
+
+        if len(raw_image) > 1:
+            print({len(raw_image)})
+            cv2_image = np.frombuffer(bytes(raw_image), dtype=np.uint8).reshape((360, 480, 4))
+            result = post_process(cv2_image, 
+                                gamma=1.0, 
+                                new_size=(640, 480), 
+                                saturation=1.05, 
+                                contrast=1)
+
+            return result
