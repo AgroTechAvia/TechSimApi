@@ -49,7 +49,7 @@ class VideoStreamSender:
 
     async def generate_frames(self):
         while self.streaming:
-            frame = self.client.get_camera_capture(camera_id=self.camera_id, is_clear=True)
+            frame = self.client.get_camera_capture(camera_id=self.camera_id)
             if frame is not None:
                 _, buffer = cv2.imencode('.jpg', frame)
                 yield video_pb2.Frame(data=buffer.tobytes(), encoding="jpeg")

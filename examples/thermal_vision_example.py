@@ -8,7 +8,7 @@ def main(args):
     client = SimClient(address = "127.0.0.1", port = 8080)
 
     while is_loop:  
-        result = client.get_camera_capture(camera_id = args.camera_num, type = CaptureType.depth)
+        result = client.get_camera_capture(camera_id = args.camera_num, type = CaptureType.thermal)
         
         if  result is not None:
             if len(result) != 0:
