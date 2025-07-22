@@ -364,7 +364,6 @@ class SimClient():
         raw_image = self.rpc_client.call('getCameraCapture', camera_id, pp_index, parameter)
 
         if len(raw_image) > 1:
-            print({len(raw_image)})
             cv2_image = np.frombuffer(bytes(raw_image), dtype=np.uint8).reshape((360, 480, 4))
             result = post_process(cv2_image, 
                                 gamma=1.0, 
