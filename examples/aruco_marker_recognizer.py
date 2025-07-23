@@ -10,10 +10,16 @@ class ArucoRecognizer:
     def __init__(self, aruco_dictionary: aruco.DetectorParameters, marker_size: float, distance_coefficients: np.ndarray, 
                  detector_parameters: np.ndarray, camera_matrix: np.ndarray) -> None:
         """
-        When initializing an instance of the class, 
-        parameters for the detector are passed, 
-        as well as data that allows the function 
-        to determine the distance and position of the markers
+        Инициализация класса для распознавания ArUco маркеров
+        При инициализации экземпляра класса передаются параметры детектора, 
+        а также данные, позволяющие функции определять расстояние и положение маркеров
+
+        Args:
+            aruco_dictionary(aruco.DetectorParameters): параметры словаря ArUco маркеров
+            marker_size(float): физический размер маркера в метрах
+            distance_coefficients(np.ndarray): коэффициенты дисторсии камеры
+            detector_parameters(np.ndarray): параметры детектора ArUco
+            camera_matrix(np.ndarray): внутренние параметры камеры (фокусное расстояние, центр изображения)
         """
         
         self.aruco_dictionary = aruco_dictionary
@@ -26,13 +32,13 @@ class ArucoRecognizer:
 
     def estimatePoseSingleMarkers(self, corners, marker_size, mtx, distortion):
         '''
-        This will estimate the rvec and tvec for each of the marker corners detected by:
+        Эта функция оценивает rvec и tvec для каждого из углов маркера, обнаруженного следующим образом:
         corners, ids, rejectedImgPoints = detector.detectMarkers(image)
-        corners - is an array of detected corners for each detected marker in the image
-        marker_size - is the size of the detected markers
-        mtx - is the camera matrix
-        distortion - is the camera distortion matrix
-        RETURN list of rvecs, tvecs, and trash (so that it corresponds to the old estimatePoseSingleMarkers())
+        corners - это массив обнаруженных углов для каждого обнаруженного маркера на изображении
+        marker_size - это размер обнаруженных маркеров
+        mtx - это матрица камеры
+        distortion - это матрица дисторсии камеры
+        Возвращает список rvecs, tvecs и trash (чтобы соответствовать старой функции estimatePoseSingleMarkers())
         '''
         marker_points = np.array([[-marker_size / 2, marker_size / 2, 0],
                                 [marker_size / 2, marker_size / 2, 0],
@@ -50,19 +56,18 @@ class ArucoRecognizer:
 
     def detect_aruco_markers(self, frame: np.ndarray) -> Tuple[np.ndarray,np.ndarray,np.ndarray,np.ndarray]:
         """
-        This function recognizes markers on an image, draws local coordinate systems on it, 
-        as well as information (ID and distance). 
-        Returns information about markers and rotations 
-        and translations matrices if they are recognized, otherwise none
+        Эта функция распознает маркеры на изображении, рисует локальные системы координат на нем, 
+        а также информацию (ID и расстояние). 
+        Возвращает информацию о маркерах и матрицах вращения и перемещения, если они распознаны, иначе None
 
         Args:
-            frame(np.array): openCV image from airsim
+            frame(np.array): изображение OpenCV от airsim
 
         Returns:
-            ndarray: openCV image   
-            ndarray: recognized marker ids      
-            ndarray: rotation vector   
-            ndarray: translation vector         
+            ndarray: изображение OpenCV   
+            ndarray: распознанные ID маркеров      
+            ndarray: вектор вращения   
+            ndarray: вектор перемещения         
         """
         
         markers_corners, markers_ids, rejected_img_points = self.detector.detectMarkers(image = frame) 
