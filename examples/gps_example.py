@@ -19,7 +19,7 @@ def main():
         if control.send_RAW_msg(MultirotorControl.MSPCodes['MSP_RAW_GPS'], data=[]):
             dataHandler = control.receive_msg()
             control.process_recv_data(dataHandler)
-            print("lat: ", control.GPS_DATA['lat']," lon: ",control.GPS_DATA['lon'])  
+            print("lat: ", control.GPS_DATA['lat']/(10**7)," lon: ",control.GPS_DATA['lon']/(10**7))  
             
             """fix : Тип фиксации (0 = нет, 1 = 2D, 2 = 3D)
             numSat : Количество спутников

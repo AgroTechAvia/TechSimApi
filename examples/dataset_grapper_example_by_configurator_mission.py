@@ -41,7 +41,7 @@ def main(folder_name, capture_frequency, image_prefix, max_images, camera_num):
     control.receive_msg()
     time.sleep(0.1)
     
-    control.send_RAW_RC([1500, 1450, 1400, 1500, 2000, 1000, 1000])
+    control.send_RAW_RC([1500, 1450, 1700, 1500, 2000, 1000, 1000])
     control.receive_msg()
     time.sleep(5)
     
