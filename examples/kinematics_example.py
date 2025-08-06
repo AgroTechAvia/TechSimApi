@@ -19,7 +19,6 @@ def main():
         
         # Вывод данных о местоположении (координаты x, y, z)
         print('location: ', *result['location'])
-        
         # Вывод данных об ориентации (углы поворота)
         print('orientation: ', *result['orientation'])
         # Вывод данных о линейной скорости (скорости по осям x, y, z)
