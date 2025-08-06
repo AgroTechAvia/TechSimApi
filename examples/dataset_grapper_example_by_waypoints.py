@@ -1,6 +1,6 @@
 import os
 import time
-from agrotechsimapi import SimClient
+from agrotechsimapi import SimClient, CaptureType
 
 import cv2
 import argparse
