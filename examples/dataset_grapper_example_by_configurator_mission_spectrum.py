@@ -11,7 +11,12 @@ from inavmspapi import MultirotorControl, TCPTransmitter
 from inavmspapi.msp_codes import MSPCodes
 
 def get_spectrum_name_split(capture_type):
-    return capture_type.name.split('_')[-1]
+    if capture_type == CaptureType.spectrum_NIR:
+        return "NIR"
+    elif capture_type == CaptureType.spectrum_R:
+        return "RED"
+    else:
+        return capture_type.name.split('_')[-1]
 
 def create_unique_folder(base_folder):
     folder = base_folder
@@ -22,30 +27,17 @@ def create_unique_folder(base_folder):
     os.makedirs(folder)
     return folder
 
-def create_spectrum_subfolders(main_folder, capture_types):
-
-    subfolders = {}
-    for cap_type in capture_types:
-        subfolder_name = get_spectrum_name_split(cap_type)
-        subfolder_path = os.path.join(main_folder, subfolder_name)
-        
-        os.makedirs(subfolder_path, exist_ok=True)
-        subfolders[cap_type] = subfolder_path
-    
-    return subfolders
-
-def capture_and_save_image(client, camera_id, Capture_Type, folder, image_prefix):
+def capture_and_save_image(client, camera_id, Capture_Type, folder, image_counter):
 
     result = client.get_camera_capture(camera_id=camera_id, type=Capture_Type)
 
     if result is not None and len(result) != 0:
-        now = datetime.now()
-        formatted_time = now.strftime("%Y_%m_%d_%H_%M_%S_%f")[:-4]
-        image_name = f"{image_prefix}_{get_spectrum_name_split(Capture_Type)}_{formatted_time}.png"
+        image_name = f"{image_counter:04d}_{get_spectrum_name_split(Capture_Type)}.png"
         file_path = os.path.join(folder, image_name)
         cv2.imwrite(file_path, result)
         print(f"Сохранено изображение: {file_path}")
-        return None
+        return True
+    return False
 
 def main(folder_name, capture_frequency, capture_types, image_prefix, camera_num, capture_horizontal_speed):
 
@@ -59,11 +51,11 @@ def main(folder_name, capture_frequency, capture_types, image_prefix, camera_num
 
     folder = create_unique_folder(folder_name)
     print(f"Папка сохранения: {folder}")
-    subfolders = create_spectrum_subfolders(folder, capture_types)
 
     client = SimClient(address="127.0.0.1", port=8080)
     is_loop = True
     sleep_btw_sperctrum = 0.03
+    image_counter = 1
 
     control.send_RAW_RC([1000, 1000, 1000, 1000, 1000, 1000, 1000])
     control.receive_msg()
@@ -87,9 +79,14 @@ def main(folder_name, capture_frequency, capture_types, image_prefix, camera_num
             vx, vy, vz = kinematic_result['linear_velocity']
             speed_magnitude_horizontal = math.sqrt((vx * 100)**2 + (vy * 100)**2)
             if speed_magnitude_horizontal > capture_horizontal_speed:
+                capture_success = False
                 for capture_type in capture_types:
-                    capture_and_save_image(client, camera_id=camera_num, Capture_Type=capture_type, folder=subfolders[capture_type], image_prefix=image_prefix)
+                    if capture_and_save_image(client, camera_id=camera_num, Capture_Type=capture_type, folder=folder, image_counter=image_counter):
+                        capture_success = True
                     time.sleep(sleep_btw_sperctrum)
+                
+                if capture_success:
+                    image_counter += 1
 
         except Exception as e:
             print(f"Error: {str(e)}")
