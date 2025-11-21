@@ -261,32 +261,17 @@ class SimClient():
         
         return range_point
 
-    def set_led_intensity(self,
-                            led_id : int = 0,
-                            new_intensity : float = 0.5):
+    def set_Diod(self, r, g, b):
+
         """
-        This feature allows you to change the intensity of the brightness of the light diodes on the drone
+        This feature allows you to change the color of the light diode on the drone
 
         Args:
-            led_id (int) : id of led diode
-            new_intensity  (float) : intensity in range 0..1
+            RGB (int) : color of the diod
         """
         
-        self.rpc_client.call('setLedIntensity', led_id, new_intensity)
+        self.rpc_client.call('setDiod', r, g, b)
 
-    def set_led_state(self,
-                        led_id : int = 0,
-                        new_state : bool = True):
-        
-        """
-        This feature allows you to enable or to disable the light diodes on the drone
-
-        Args:
-            led_id (int) : id of led diode
-            new_state  (bool) : new diode state
-        """
-        
-        self.rpc_client.call('setLedState', led_id, new_state)
 
     def get_kinametics_data(self):
 
