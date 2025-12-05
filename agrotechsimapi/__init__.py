@@ -1,4 +1,3 @@
-from agrotechsimapi._version import __version__
 from agrotechsimapi.client import SimClient
 from agrotechsimapi.client import CaptureType
 from agrotechsimapi.video_pb2 import *
