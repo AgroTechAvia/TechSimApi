@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,18 +10,17 @@ authors = [
 ]
 description = "This repository contains the API for the AgroTechAvia simulators. This repository also contains several examples of how to interact with the API."
 readme = "README.md"
-
 requires-python = ">=3.10"
-
 license = "Apache-2.0"
 
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
 ]
+
 dependencies = [
     "backports.ssl-match-hostname",
-    "scontourpyix",
+    "contourpy",
     "cycler",
     "fonttools",
     "future",
@@ -45,5 +44,9 @@ dependencies = [
     "pyserial",
     "six",
     "tornado",
-    "inavmspapi"
+    "inavmspapi >= 1.0.1",
 ]
+
+[tool.setuptools]
+# Явно перечислите все ваши пакеты (папки с __init__.py)
+packages = ["agrotechsimapi", "modules"]

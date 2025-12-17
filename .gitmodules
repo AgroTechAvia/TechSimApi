@@ -1,4 +1,0 @@
-[submodule "libs/inavmspapi"]
-	path = libs/inavmspapi
-	url = https://github.com/AgroTechAvia/InavMSPApi.git
-	branch = update
