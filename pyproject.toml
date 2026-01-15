@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agrotechsimapi"
-version = "1.0.0b"
+version = "1.0.0"
 authors = [
   { name="AgroTechAvia", email="example@main.com" },
 ]
@@ -44,9 +44,9 @@ dependencies = [
     "pyserial",
     "six",
     "tornado",
-    "inavmspapi >= 1.0.1",
+    "transforms3d",
+    "inavmspapi",
 ]
 
 [tool.setuptools]
-# Явно перечислите все ваши пакеты (папки с __init__.py)
 packages = ["agrotechsimapi", "modules","agrotechsimapi.utils"]

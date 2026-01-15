@@ -3,33 +3,226 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
 # Папки окружений
 env/
 venv/
 .venv/
 ENV/
+env.bak/
+venv.bak/
 agrotechsim_venv/
+
+# Кэш pytest и coverage
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+# Покрытие кода
+htmlcov/
+*.lcov
+
+# Кэш mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Кэш pytype
+.pytype/
+
+# Кэш Cython
+cython_debug/
+
+# Кэш pip
+pip-wheel-metadata/
+pip-delete-this-directory.txt
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# Кэш ruff
+.ruff_cache/
+
+# Кэш black
+.black_cache/
 
 # Файлы конфигурации IDE
 .idea/
 .vscode/
 *.sublime-*
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings
+.run
+.history
+
+# Jupyter Notebook
+.ipynb_checkpoints
 
 # Файлы системных временных записей
 *.log
 *.tmp
-
-# Папка с дистрибутивом библиотеки
-dist/
-build/
-
-# Установка зависимостей
-*.egg-info/
-
-# Прочие временные и специальные файлы
-.DS_Store
-Thumbs.db
+*.temp
+*.bak
+*.backup
+*.orig
+*.rej
+*.save
+*~
 
 # Операционные системы
 *.sqlite3
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+*.lnk
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+test-results/
+test-reports/
+junit.xml
+
+# pyenv
+.python-version
+
+# pipenv
+#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
+#   However, in case of collaboration, if having platform-specific dependencies or dependencies
+#   having no cross-platform support, pipenv may install dependencies that don't work, or not
+#   install all needed dependencies.
+#Pipfile.lock
+
+# PEP 582; used by e.g. github.com/David-OConnor/pyflow
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PyCharm
+#  JetBrains IDE config
+.idea/
+*.iws
+out/
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Кэш для встроенных модулей симулятора (если есть)
+*.simcache/
+simulator_cache/
+
+# Логи тестов
+test_logs/
+*.testlog
+
+# Результаты бенчмарков
+benchmark_results/
+*.benchmark
+
+# Файлы дампов и профилирования
+*.prof
+*.line_prof
+*.memory_prof
+*.dump
+*.heap
+
+# Временные файлы видео (если есть запись тестов)
+*.mp4
+*.avi
+*.mov
+test_videos/
+
+# Файлы конфигурации локальных тестов
+.local_test_config.yaml
+.local_test_config.json

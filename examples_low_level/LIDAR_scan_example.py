@@ -58,7 +58,6 @@ def main():
         # range_error - погрешность измерения дальности (0.1)
         # is_clear - очистка предыдущих данных
         result = client.get_laser_scan(angle_min=-np.pi, angle_max=np.pi, range_max=10, num_ranges=360, range_error=0.1, is_clear=True)
-        
         # Отображение полученных данных на графике
         plot_lidar_data(result)
 
