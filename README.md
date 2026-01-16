@@ -1,10 +1,7 @@
 # AgroTechSim API
 
-<div align="center">
-  <img src="img/header.png" alt="AgroTechSim API" width="800">
-  
-  [Русский](#русский) | [English](#english)
-</div>
+![AgroTechSim API](https://raw.githubusercontent.com/AgroTechAvia/TechSimApi/main/img/header.png)
+[Русский](#русский) | [English](#english)
 
 ---
 
