@@ -39,7 +39,7 @@ pip install agrotechsimapi
 
 1. Клонируйте репозиторий:
 ```bash
-git clone https://github.com/AgroTechAvia/agrotechsimapi.git
+git clone https://github.com/AgroTechAvia/TechSimApi.git
 cd agrotechsimapi
 ```
 
@@ -70,8 +70,8 @@ pip install .
 
 # 4. Установите agrotechsimapi
 cd ..
-git clone https://github.com/AgroTechAvia/agrotechsimapi.git
-cd agrotechsimapi
+git clone https://github.com/AgroTechAvia/TechSimApi.git
+cd TechSimApi
 pip install .
 ```
 
@@ -132,7 +132,7 @@ cv2.destroyAllWindows()
 
 ```bash
 # Перейдите в директорию проекта
-cd agrotechsimapi
+cd TechSimApi
 
 # Запустите тесты с симулятором
 pytest test/test_sim_client_real.py --with-simulator -v
@@ -239,8 +239,8 @@ This method will automatically install all dependencies, including the required 
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/AgroTechAvia/agrotechsimapi.git
-cd agrotechsimapi
+git https://github.com/AgroTechAvia/TechSimApi.git
+cd TechSimApi
 ```
 
 2. Run the installation script:
@@ -270,8 +270,8 @@ pip install .
 
 # 4. Install agrotechsimapi
 cd ..
-git clone https://github.com/AgroTechAvia/agrotechsimapi.git
-cd agrotechsimapi
+git clone https://github.com/AgroTechAvia/TechSimApi.git
+cd TechSimApi
 pip install .
 ```
 
@@ -331,10 +331,10 @@ To verify that the module works correctly with the simulator, use the integratio
 
 ```bash
 # Go to the project directory
-cd agrotechsimapi
+cd TechSimApi
 
 # Run tests with simulator
-pytest tests/integration/test_sim_client_real.py --with-simulator -v
+pytest tests/test_sim_client_real.py --with-simulator -v
 ```
 
 #### 📊 What the tests check:
@@ -360,10 +360,6 @@ The `test_sim_client_real.py` test sequentially verifies:
 - **First lidar and radar measurements** may be incorrect (simulator feature)
 - **For manual checking** you can use the script:
 
-```bash
-# Quick connection check
-python tests/integration/simple_test.py
-```
 
 #### 🔧 Example of successful test output:
 
