@@ -40,7 +40,7 @@ pip install agrotechsimapi
 1. Клонируйте репозиторий:
 ```bash
 git clone https://github.com/AgroTechAvia/TechSimApi.git
-cd agrotechsimapi
+cd TechSimApi
 ```
 
 2. Запустите скрипт установки:
