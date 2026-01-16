@@ -14,7 +14,7 @@
 
 **AgroTechSim API** — это Python-библиотека для работы с симулятором AgroTechSim, предназначенная для получения телеметрии с дронов, обработки сенсорных данных и реализации систем автономного управления. Библиотека предоставляет как низкоуровневый доступ к сырым данным сенсоров, так и высокоуровневые абстракции для упрощённого управления дроном.
 
-Модуль позволяет разработчикам создавать сложные алгоритмы компьютерного зрения, навигации и управления без необходимости работы с реальным оборудованием, используя полнофункциональный симулятор сельскохозяйственных дронов.
+Модуль позволяет разработчикам создавать сложные алгоритмы компьютерного зрения, навигации и управления без необходимости работы с реальным оборудованием, используя полнофункциональный симулятор дронов.
 
 ### 📊 Совместимость
 
@@ -22,7 +22,7 @@
 |-----------|--------|--------|
 | **AgroTechSim API** | 1.0.0 | ✅ Актуальная |
 | **Симулятор AgroTechSim** | 1.0.3 | ✅ Рекомендуемая |
-| **Python** | 3.10+ | ✅ Рекомендуемая |
+| **Python** | 3.10 | ✅ Рекомендуемая |
 | **InavMSPApi** | 1.1.0 | ✅ Зависимость |
 
 ### ⚡ Установка
@@ -96,9 +96,9 @@ pip install .
 
 В репозитории представлены готовые примеры:
 
-#### `examples_low_level/` - Низкоуровневые примеры:
+#### `examples_low_level/` - Низкоуровневые примеры
 
-#### `examples_high_level/` - Высокоуровневые примеры:
+#### `examples_high_level/` - Высокоуровневые примеры
 
 
 ### 🚀 Быстрый старт
@@ -214,7 +214,7 @@ Test-NetConnection -ComputerName localhost -Port 8080
 
 **AgroTechSim API** is a Python library for working with the AgroTechSim simulator, designed for obtaining drone telemetry, processing sensor data, and implementing autonomous control systems. The library provides both low-level access to raw sensor data and high-level abstractions for simplified drone control.
 
-The module enables developers to create complex computer vision, navigation, and control algorithms without the need for real hardware, using a full-featured agricultural drone simulator.
+The module enables developers to create complex computer vision, navigation, and control algorithms without the need for real hardware, using a full-featured drone simulator.
 
 ### 📊 Compatibility
 
@@ -296,17 +296,9 @@ pip install .
 
 The repository includes ready-to-use examples:
 
-#### `examples_low_level/` - Low-level examples:
-- `camera_capture.py` - Working with drone cameras
-- `lidar_scan.py` - Environment scanning with lidar
-- `sensor_fusion.py` - Combined use of different sensors
-- `led_control.py` - LED lighting control
+#### `examples_low_level/` - Low-level examples
 
-#### `examples_high_level/` - High-level examples:
-- `autonomous_flight.py` - Autonomous route flight
-- `object_tracking.py` - Object tracking using camera
-- `precision_landing.py` - Precision landing using visual markers
-- `mission_planner.py` - Mission planning and execution
+#### `examples_high_level/` - High-level examples
 
 ### 🚀 Quick Start
 
@@ -418,7 +410,3 @@ Test-NetConnection -ComputerName localhost -Port 8080
 Testing allows you to ensure that all module components work correctly with the current simulator version.
 
 ---
-
-<div align="center">
-  <sub>Built with ❤️ by AgroTechAvia</sub>
-</div>
