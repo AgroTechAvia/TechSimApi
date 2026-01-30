@@ -3,7 +3,7 @@ from inavmspapi.transmitter import TCPTransmitter
 from inavmspapi.msp_codes import MSPCodes
 from agrotechsimapi.client import SimClient
 
-from agrotechsimapi.pid import PID
+from agrotechsimapi.pid import PID, AdaptivePID
 from typing import Iterable
 
 from agrotechsimapi.utils.utils import LoopingTimer, sim_to_api_distance, vel_to_rc_signal
@@ -27,7 +27,7 @@ if __name__ == "__main__":
 class HighLevelSimClient:
     def __init__(self): 
 
-        self.__alt_pid = PID(2.5, 0.015, 7.5)
+        self.__alt_pid = PID(3, 0.015, 8)
         
         self._odom = (0.0, 0.0)
 
@@ -163,13 +163,9 @@ class HighLevelSimClient:
         roll, pitch, yaw = quat2euler((qw, qx, qy, qz), axes='sxyz')
         return [roll, pitch, yaw]
 
+    
     def go_to_xy(self, frame: str, x: float, y: float) -> bool:
-        """
-        Блокирующий полёт в точку.
-        frame: 'odom'|'map' (абсолют) или 'base_link'|'body' (относительный сдвиг в корпусной СК: x вперёд, y влево).
-        Возвращает True (достиг) / False (таймаут).
-        """
-        # ---- алиасы кадров ----
+        # ========= FRAME =========
         if frame == "odom":
             use_body_shift = False
             use_odom_frame = True
@@ -179,179 +175,152 @@ class HighLevelSimClient:
         else:
             raise ValueError("frame must be 'odom' or 'base_link'")
 
-        # ===== ХАРДКОД НАСТРОЕК =====
-        PERIOD       = 1/50.0      # цикл управления, c
-        X_THR        = 0.2        # допуск по оси вперёд (м)
-        Y_THR        = 0.2        # допуск по оси влево (м)
-        RC_PER_MPS   = 100.0       # м/с -> PWM вокруг 1500
-        VMAX_AXIS    = 0.3        # ограничение скорости на ось, м/с
+        # ========= PARAMETERS =========
+        PERIOD = 1 / 50.0
 
-        K_LIMIT = 0.5
+        POS_THR = 0.1
+        VEL_THR = 0.004
 
-        T_MIN        = 1.0         # минимум таймаута, c
-        T_MAX        = 30.0        # максимум таймаута, c
-        # PID-коэффициенты по осям (скорости в м/с)
-        PITCH_KP, PITCH_KI, PITCH_KD = 0.05, 0.0001, 0.1  # вперёд (err_x)   0.05, 0.0002, 0.1
-        ROLL_KP,  ROLL_KI,  ROLL_KD  = 0.05, 0.0001, 0.1  # влево (err_y)    0.05, 0.0002, 0.1
+        V_MAX = 1.34 #1.325
+        A_MAX = 1.45   #1.4       
 
-        # PITCH_KP, PITCH_KI, PITCH_KD = 0.15, 0.0, 0.0  # вперёд (err_x)
-        # ROLL_KP,  ROLL_KI,  ROLL_KD  = 0.15, 0.0, 0.0  # влево (err_y)
+        T_MIN = 1.0
+        T_MAX = 30.0
 
-        FF_PITCH = FF_ROLL = 0.105
+        # --- Position loop (SOFT) ---
+        KP_POS = 1.26        
 
-        # PITCH_I_LIMIT = K_LIMIT * VMAX_AXIS / PITCH_KI
-        # ROLL_I_LIMIT = K_LIMIT * VMAX_AXIS / ROLL_KI
+        # --- Velocity loop ---
+        KP_VEL = 4.2 #3.69
+        KI_VEL = 0.938 #0.935
+        KD_VEL = 8.5 # 6.0
 
-        PITCH_I_LIMIT = None
-        ROLL_I_LIMIT = None
-        # ===========================
+        pid_vx = PID(KP_VEL, KI_VEL, KD_VEL,
+                    max_control=V_MAX,
+                    i_limit=0.3)
 
-        # --- PIDs ---
-        pid_pitch = PID(PITCH_KP, PITCH_KI, PITCH_KD, max_control=VMAX_AXIS, i_limit=PITCH_I_LIMIT)
-        pid_roll  = PID(ROLL_KP,  ROLL_KI,  ROLL_KD,  max_control=VMAX_AXIS, i_limit=ROLL_I_LIMIT)
-        pid_pitch.reset(); pid_roll.reset()
-        first_iter = True
+        pid_vy = PID(KP_VEL, KI_VEL, KD_VEL,
+                    max_control=V_MAX,
+                    i_limit=0.3)
 
-        mono   = time.monotonic
+        pid_vx.reset()
+        pid_vy.reset()
+
+        mono = time.monotonic
         next_t = mono()
 
-        # --- текущая поза (мировая) ---
         kin = self.get_sim_kinematics()
         cx, cy = self._world_xy(kin)
 
         qx, qy, qz, qw = kin["orientation"]
-        _, _, yaw = quat2euler((qw, qx, qy, qz), axes='sxyz')
+        _, _, yaw = quat2euler((qw, qx, qy, qz), axes="sxyz")
 
-        # --- цель в МИРОВОЙ СК ---
+        # ========= TARGET =========
         if not use_body_shift:
-            # odom → world: просто добавляем сохранённый сдвиг
-            if use_odom_frame and (self._odom0_xy is not None):
+            if use_odom_frame and self._odom0_xy is not None:
                 x0, y0 = self._odom0_xy
-                tgt_x, tgt_y = x0 + float(x), y0 + float(y)
+                tgt_x, tgt_y = x0 + x, y0 + y
             else:
-                # если ноль не задан — трактуем как world как есть
-                tgt_x, tgt_y = float(x), float(y)
+                tgt_x, tgt_y = x, y
         else:
-            # base_link → world (как у тебя было, без изменений)
             tgt_x = cx + math.cos(yaw) * x - math.sin(yaw) * y
             tgt_y = cy + math.sin(yaw) * x + math.cos(yaw) * y
 
-        # --- стартовая дистанция и таймаут ---
         dx0 = tgt_x - cx
-        dy0 = tgt_y - cy                      # инверсия мирового y, как в файле
+        dy0 = tgt_y - cy
         dist0 = math.hypot(dx0, dy0)
         timeout = max(T_MIN, min((dist0 / 0.1) * 2.0, T_MAX))
         deadline = mono() + timeout
 
+        x_prev, y_prev = cx, cy
+        v_fwd_target_prev = 0.0
+        v_left_target_prev = 0.0
+
+    
         try:
             while True:
-                kin = self.get_sim_kinematics()  # кэш!
+                kin = self.get_sim_kinematics()
                 x_w = sim_to_api_distance(kin["location"][0])
                 y_w = sim_to_api_distance(kin["location"][1])
 
                 qx, qy, qz, qw = kin["orientation"]
-                _, _, yaw = quat2euler((qw, qx, qy, qz), axes='sxyz')  # как в файле
-                # print(yaw)
-                # yaw = -yaw
-                # print(x_w, y_w, yaw)
+                _, _, yaw = quat2euler((qw, qx, qy, qz), axes="sxyz")
 
-                # yaw += 1.57
-                # print(yaw)
-                # print()
-
-                # --- мировая разность до цели ---
+                # ========= POSITION ERROR =========
                 dx = tgt_x - x_w
-                dy = tgt_y - y_w             # инвертируем мировой y (как в файле)
+                dy = tgt_y - y_w
 
-                # print(f"dx: {dx}, dy: {dy}")
-
-                # --- локальная ошибка (корпусная СК: x вперёд, y влево) ---
                 err_x =  math.cos(yaw) * dx + math.sin(yaw) * dy
-                err_y =  -math.sin(yaw) * dx + math.cos(yaw) * dy
+                err_y = -math.sin(yaw) * dx + math.cos(yaw) * dy
 
-                # print(f"err_x: {err_x}, err_y: {err_y}")
+                # ========= POSITION → VELOCITY =========
+                v_fwd_target  = KP_POS * err_x
+                v_left_target = KP_POS * err_y
 
-                # --- условие достижения (по осям) ---
-                if abs(err_x) < X_THR and abs(err_y) < Y_THR:
+                # accel limiting
+                dv_fwd  = max(-A_MAX * PERIOD, min(v_fwd_target  - v_fwd_target_prev,  A_MAX * PERIOD))
+                dv_left = max(-A_MAX * PERIOD, min(v_left_target - v_left_target_prev, A_MAX * PERIOD))
+
+                v_fwd_target  = v_fwd_target_prev  + dv_fwd
+                v_left_target = v_left_target_prev + dv_left
+
+                v_fwd_target  = max(-V_MAX, min(v_fwd_target,  V_MAX))
+                v_left_target = max(-V_MAX, min(v_left_target, V_MAX))
+
+                v_fwd_target_prev  = v_fwd_target
+                v_left_target_prev = v_left_target
+
+                # ========= CURRENT VELOCITY =========
+                vx_w = (x_w - x_prev) / PERIOD
+                vy_w = (y_w - y_prev) / PERIOD
+
+                v_fwd_current  =  math.cos(yaw) * vx_w + math.sin(yaw) * vy_w
+                v_left_current = -math.sin(yaw) * vx_w + math.cos(yaw) * vy_w
+
+                x_prev, y_prev = x_w, y_w
+
+                # ========= VELOCITY LOOP =========
+                err_v_fwd  = v_fwd_target  - v_fwd_current
+                err_v_left = v_left_target - v_left_current
+
+                pid_vx.update_control(err_v_fwd)
+                pid_vy.update_control(err_v_left)
+
+                u_fwd  = pid_vx.get_control()
+                u_left = pid_vy.get_control()
+
+                pitch_pwm = vel_to_rc_signal(u_fwd)
+                roll_pwm  = vel_to_rc_signal(-u_left)  # <-- ЛЕВАЯ СК, СОХРАНЕНО
+
+                self._rpy_vel_data = (roll_pwm, pitch_pwm, 1500)
+
+                # ========= EXIT =========
+                if (
+                    math.sqrt(pow(abs(err_x),2)+pow(abs(err_y),2)) < POS_THR and
+                    math.sqrt(pow(abs(vx_w),2)+pow(abs(vy_w),2)) < VEL_THR
+                ):
                     self._rpy_vel_data = (1500, 1500, 1500)
                     return True
 
-                # --- таймаут ---
                 if mono() > deadline:
                     self._rpy_vel_data = (1500, 1500, 1500)
                     return False
-                
-                sign_pitch = 1
-                sign_roll = 1
 
-                if err_x > 0:
-                    sign_pitch = 1
-                elif err_x < 0:
-                    sign_pitch = -1
-                else:
-                    sign_pitch = 0
-
-                if err_y > 0:
-                    sign_roll = 1
-                elif err_y < 0:
-                    sign_roll = -1
-                else:
-                    sign_roll = 0
-
-                # print()
-                # print(FF_PITCH * sign_roll)
-                # print(pid_roll.current_error * pid_roll.kp)
-                # print(pid_roll.integral * pid_roll.ki)
-                # print(pid_roll.derivative * pid_roll.kd)
-                # print(pid_roll.get_control())
-
-                # --- PID по осям с порогом (как generate_control в файле) ---
-                # вперёд (pitch)
-                if abs(err_x) > X_THR:
-                    pid_pitch.update_control(err_x, reset_prev=first_iter)
-                    v_fwd = max(-VMAX_AXIS, min(FF_PITCH * sign_pitch + pid_pitch.get_control(), VMAX_AXIS))
-                    
-                else:
-                    v_fwd = 0.0
-
-                # влево (roll)
-                if abs(err_y) > Y_THR:
-                    pid_roll.update_control(err_y, reset_prev=first_iter)
-                    v_left = -max(-VMAX_AXIS, min(FF_ROLL * sign_roll + pid_roll.get_control(), VMAX_AXIS))
-                else:
-                    v_left = 0.0
-
-
-                first_iter = False
-
-                
-
-                # --- PWM маппинг (вперёд=+pitch, влево=+roll) ---
-                
-                
-                
-                
-                pitch_pwm = vel_to_rc_signal(v_fwd)
-                roll_pwm  = vel_to_rc_signal(v_left)
-
-                
-                
-
-                # print(f"###########################")
-                # print(v_fwd)
-                # print(v_left)
-                # print()
-                
-                self._rpy_vel_data = (roll_pwm, pitch_pwm, 1500)
-
-                
-
-                # периодичность
                 next_t += PERIOD
-                time.sleep(max(0.0, next_t - mono()))
+                sleep_time = max(0.0, next_t - mono())
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+
         finally:
-            # стоп по XY в любом случае
             self._rpy_vel_data = (1500, 1500, 1500)
+
+
+    
+    def _flush_log_buffer(self, log_file, buffer):
+        """Записывает буфер логов в файл"""
+        for entry in buffer:
+            self._log_pid_data(log_file, *entry)
+        log_file.flush()  # Гарантируем запись на диск
 
     def getOdomOpticflow(self):
         kin = self.get_sim_kinematics()
@@ -693,3 +662,5 @@ class HighLevelSimClient:
     def setShoot(self, time):
         with self._client_lock:
             return self._client.call_event_action()
+
+
