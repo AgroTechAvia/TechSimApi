@@ -15,6 +15,8 @@ import time
 import math
 import threading  # Добавлен импорт
 
+import matplotlib.pyplot as plt
+from collections import deque
 
 def main():
     pass
@@ -27,7 +29,7 @@ if __name__ == "__main__":
 class HighLevelSimClient:
     def __init__(self): 
 
-        self.__alt_pid = PID(3, 0.015, 8)
+        self.__alt_pid = PID(3, 0.015, 8.5)
         
         self._odom = (0.0, 0.0)
 
@@ -163,6 +165,45 @@ class HighLevelSimClient:
         roll, pitch, yaw = quat2euler((qw, qx, qy, qz), axes='sxyz')
         return [roll, pitch, yaw]
 
+    def _soft_stop_xy(self, duration=0.5, rate_hz=50, profile="smoothstep"):
+        """
+        Плавно сводит roll/pitch PWM к 1500 за duration секунд
+        с нелинейным профилем.
+        
+        profile:
+            "linear"
+            "smoothstep"
+            "tanh"
+        """
+        steps = max(1, int(duration * rate_hz))
+        dt = 1.0 / rate_hz
+
+        start_roll, start_pitch, _ = self._rpy_vel_data
+        target = 1500
+
+        def ease(x):
+            x = max(0.0, min(1.0, x))
+            if profile == "linear":
+                return x
+            elif profile == "smoothstep":
+                return x * x * (3 - 2 * x)
+            elif profile == "tanh":
+                k = 3.0
+                return math.tanh(k * x) / math.tanh(k)
+            else:
+                raise ValueError(f"Unknown profile: {profile}")
+
+        for i in range(steps):
+            t = (i + 1) / steps
+            a = ease(t)
+
+            roll  = int(start_roll  + a * (target - start_roll))
+            pitch = int(start_pitch + a * (target - start_pitch))
+
+            self._rpy_vel_data = (roll, pitch, target)
+            time.sleep(dt)
+
+        self._rpy_vel_data = (target, target, target)
     
     def go_to_xy(self, frame: str, x: float, y: float) -> bool:
         # ========= FRAME =========
@@ -179,29 +220,54 @@ class HighLevelSimClient:
         PERIOD = 1 / 50.0
 
         POS_THR = 0.1
-        VEL_THR = 0.004
+        VEL_THR = 0.0012
 
-        V_MAX = 1.34 #1.325
-        A_MAX = 1.45   #1.4       
+        T_MIN = 1.15
+        T_MAX = 60.0
 
-        T_MIN = 1.0
-        T_MAX = 30.0
+        POS_MAX = 1.2
 
-        # --- Position loop (SOFT) ---
-        KP_POS = 1.26        
+        KP_POS = 0.99
+        KI_POS = 0.001
+        KD_POS = 7.23
+        I_LIMIT_POS = 0.0001
+
+        pid_px = PID(KP_POS, 
+                     KI_POS, 
+                     KD_POS,
+                    max_control=POS_MAX,
+                    i_limit=I_LIMIT_POS) #0.84 #0.815! #0.3!
+
+        pid_py = PID(KP_POS, 
+                     KI_POS, 
+                     KD_POS,
+                    max_control=POS_MAX,
+                    i_limit=I_LIMIT_POS) # 0.84 #0.815! #0.3!
+
+        pid_px.reset()
+        pid_py.reset()
 
         # --- Velocity loop ---
-        KP_VEL = 4.2 #3.69
-        KI_VEL = 0.938 #0.935
-        KD_VEL = 8.5 # 6.0
+        KP_VEL = 7.295
+        KI_VEL = 0.001
+        KD_VEL = 7.20
 
-        pid_vx = PID(KP_VEL, KI_VEL, KD_VEL,
-                    max_control=V_MAX,
-                    i_limit=0.3)
+        I_LIMIT_VEL = 0.00001
 
-        pid_vy = PID(KP_VEL, KI_VEL, KD_VEL,
+        V_MAX = 1.15
+        A_MAX = 1.25 
+
+        pid_vx = PID(KP_VEL, 
+                     KI_VEL, 
+                     KD_VEL,
                     max_control=V_MAX,
-                    i_limit=0.3)
+                    i_limit=I_LIMIT_VEL) #0.84 #0.815! #0.3!
+
+        pid_vy = PID(KP_VEL, 
+                     KI_VEL, 
+                     KD_VEL,
+                    max_control=V_MAX,
+                    i_limit=I_LIMIT_VEL) # 0.84 #0.815! #0.3!
 
         pid_vx.reset()
         pid_vy.reset()
@@ -216,6 +282,9 @@ class HighLevelSimClient:
         _, _, yaw = quat2euler((qw, qx, qy, qz), axes="sxyz")
 
         # ========= TARGET =========
+        x0 = 0
+        y0 = 0
+
         if not use_body_shift:
             if use_odom_frame and self._odom0_xy is not None:
                 x0, y0 = self._odom0_xy
@@ -240,8 +309,10 @@ class HighLevelSimClient:
         try:
             while True:
                 kin = self.get_sim_kinematics()
-                x_w = sim_to_api_distance(kin["location"][0])
-                y_w = sim_to_api_distance(kin["location"][1])
+                x_w = sim_to_api_distance(kin["location"][0]) + x0
+                y_w = sim_to_api_distance(kin["location"][1]) + y0
+
+                
 
                 qx, qy, qz, qw = kin["orientation"]
                 _, _, yaw = quat2euler((qw, qx, qy, qz), axes="sxyz")
@@ -250,13 +321,21 @@ class HighLevelSimClient:
                 dx = tgt_x - x_w
                 dy = tgt_y - y_w
 
+
                 err_x =  math.cos(yaw) * dx + math.sin(yaw) * dy
                 err_y = -math.sin(yaw) * dx + math.cos(yaw) * dy
 
-                # ========= POSITION → VELOCITY =========
-                v_fwd_target  = KP_POS * err_x
-                v_left_target = KP_POS * err_y
 
+
+                # ========= POSITION → VELOCITY =========
+                #v_fwd_target  = KP_POS * err_x
+                #v_left_target = KP_POS * err_y
+                pid_px.update_control(err_x)
+                pid_py.update_control(err_y)
+
+                v_fwd_target = pid_px.get_control()
+                v_left_target = pid_py.get_control()
+                
                 # accel limiting
                 dv_fwd  = max(-A_MAX * PERIOD, min(v_fwd_target  - v_fwd_target_prev,  A_MAX * PERIOD))
                 dv_left = max(-A_MAX * PERIOD, min(v_left_target - v_left_target_prev, A_MAX * PERIOD))
@@ -294,16 +373,33 @@ class HighLevelSimClient:
 
                 self._rpy_vel_data = (roll_pwm, pitch_pwm, 1500)
 
+                location_error = math.sqrt((dx**2) + (dy**2))
+                velocity_error = math.sqrt((vx_w**2) + (vy_w**2))
                 # ========= EXIT =========
                 if (
-                    math.sqrt(pow(abs(err_x),2)+pow(abs(err_y),2)) < POS_THR and
-                    math.sqrt(pow(abs(vx_w),2)+pow(abs(vy_w),2)) < VEL_THR
+                    location_error < POS_THR and
+                    velocity_error < VEL_THR
                 ):
-                    self._rpy_vel_data = (1500, 1500, 1500)
+                    self._soft_stop_xy(duration=4, rate_hz=50, profile="tanh")
+                    print(f"[STAT] X_errror = {dx:.3}, Y_errror = {dy:.3}")
+                    print(f"[STAT] Error {location_error} < THR {POS_THR}")
+
+                    '''kin_validation = self.get_sim_kinematics()
+
+                    velocity_error_validation = math.sqrt((abs(kin_validation["linear_velocity"][0])**2) + (abs(kin_validation["linear_velocity"][1])**2))
+                    
+                    x_error_validation = abs(x - kin["location"][0])
+                    y_error_validation = abs(y - kin["location"][1])
+
+                    location_error_validation = math.sqrt((x_error_validation**2) + (y_error_validation**2))
+                    if (
+                        location_error_validation < POS_THR and
+                        velocity_error_validation < VEL_THR
+                    ):'''
                     return True
 
                 if mono() > deadline:
-                    self._rpy_vel_data = (1500, 1500, 1500)
+                    self._soft_stop_xy(duration=5, rate_hz=50 , profile="tanh")
                     return False
 
                 next_t += PERIOD
@@ -312,10 +408,8 @@ class HighLevelSimClient:
                     time.sleep(sleep_time)
 
         finally:
-            self._rpy_vel_data = (1500, 1500, 1500)
+            self._soft_stop_xy(duration=5, rate_hz=50 , profile="tanh")
 
-
-    
     def _flush_log_buffer(self, log_file, buffer):
         """Записывает буфер логов в файл"""
         for entry in buffer:
@@ -362,8 +456,8 @@ class HighLevelSimClient:
         PERIOD     = 1/20.0     # 20 Гц
         TOL        = 0.025       # рад, допуск по углу
         MAX_TIME   = 10.0       # сек, таймаут
-        MAX_RATE   = 0.75        # рад/с, ограничение выхода PID
-        KP, KI, KD = 3.0, 0.001, 0.30  # PID по курсу
+        MAX_RATE   = 1        # рад/с, ограничение выхода PID
+        KP, KI, KD = 3.5, 0.001, 0.4  # PID по курсу
         I_LIMIT    = None       # можно поставить число (напр. 600) для ограничения интеграла
         # =============================
 
@@ -470,7 +564,7 @@ class HighLevelSimClient:
         PERIOD        = 0.05      # 20 Гц
         MIN_H         = 0.00
         MAX_H         = 5.00
-        STEP          = 0.01      # м за шаг сетпоинта
+        STEP          = 0.005      # м за шаг сетпоинта
         TIMEOUT_MIN   = 15.0      # базовый таймаут
         TIMEOUT_COEF  = 10.0      # доп. таймаут пропорционален высоте
         # ---------------------------
