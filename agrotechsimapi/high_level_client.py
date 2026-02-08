@@ -29,7 +29,7 @@ if __name__ == "__main__":
 class HighLevelSimClient:
     def __init__(self): 
 
-        self.__alt_pid = PID(3, 0.015, 8.5)
+        self.__alt_pid = PID(2.25, 0.015, 7)
         
         self._odom = (0.0, 0.0)
 
@@ -219,55 +219,60 @@ class HighLevelSimClient:
         # ========= PARAMETERS =========
         PERIOD = 1 / 50.0
 
-        POS_THR = 0.1
-        VEL_THR = 0.0012
+        POS_THR = 0.08
+        VEL_THR = 0.00075
 
         T_MIN = 1.15
         T_MAX = 60.0
 
-        POS_MAX = 1.2
+        POS_MAX = 1.35
 
-        KP_POS = 0.99
-        KI_POS = 0.001
-        KD_POS = 7.23
+        # Начальный импульс для преодоления инерции
+        initial_push_active = True
+        INITIAL_PUSH = 17  # Сила толчка (м/с). Настройте: 0.15-0.35 для разных дронов
+        PUSH_DURATION = 1.15 # Длительность импульса в секундах
+
+        KP_POS = 1.28
+        KI_POS = 0
+        KD_POS = 7.2
         I_LIMIT_POS = 0.0001
 
         pid_px = PID(KP_POS, 
-                     KI_POS, 
-                     KD_POS,
+                    KI_POS, 
+                    KD_POS,
                     max_control=POS_MAX,
-                    i_limit=I_LIMIT_POS) #0.84 #0.815! #0.3!
+                    i_limit=I_LIMIT_POS)
 
         pid_py = PID(KP_POS, 
-                     KI_POS, 
-                     KD_POS,
+                    KI_POS, 
+                    KD_POS,
                     max_control=POS_MAX,
-                    i_limit=I_LIMIT_POS) # 0.84 #0.815! #0.3!
+                    i_limit=I_LIMIT_POS)
 
         pid_px.reset()
         pid_py.reset()
 
         # --- Velocity loop ---
-        KP_VEL = 7.295
+        KP_VEL = 7.73
         KI_VEL = 0.001
-        KD_VEL = 7.20
+        KD_VEL = 7.14
 
-        I_LIMIT_VEL = 0.00001
+        I_LIMIT_VEL = 0.13
 
-        V_MAX = 1.15
-        A_MAX = 1.25 
+        V_MAX = 1.03
+        A_MAX = 20 
 
         pid_vx = PID(KP_VEL, 
-                     KI_VEL, 
-                     KD_VEL,
+                    KI_VEL, 
+                    KD_VEL,
                     max_control=V_MAX,
-                    i_limit=I_LIMIT_VEL) #0.84 #0.815! #0.3!
+                    i_limit=I_LIMIT_VEL)
 
         pid_vy = PID(KP_VEL, 
-                     KI_VEL, 
-                     KD_VEL,
+                    KI_VEL, 
+                    KD_VEL,
                     max_control=V_MAX,
-                    i_limit=I_LIMIT_VEL) # 0.84 #0.815! #0.3!
+                    i_limit=I_LIMIT_VEL)
 
         pid_vx.reset()
         pid_vy.reset()
@@ -305,14 +310,25 @@ class HighLevelSimClient:
         v_fwd_target_prev = 0.0
         v_left_target_prev = 0.0
 
-    
+        # === НАЧАЛЬНЫЙ ИМПУЛЬС: вычисляем направление к цели ===
+        
+        push_start_time = mono()
+        # Нормализованный вектор направления в локальной СК дрона
+        initial_err_x = math.cos(yaw) * dx0 + math.sin(yaw) * dy0
+        initial_err_y = -math.sin(yaw) * dx0 + math.cos(yaw) * dy0
+        initial_dist = math.hypot(initial_err_x, initial_err_y)
+        
+        if initial_dist > 0.01:  # Избегаем деления на ноль
+            push_dir_x = initial_err_x / initial_dist  # Направление вперед/назад
+            push_dir_y = initial_err_y / initial_dist  # Направление влево/вправо
+        else:
+            push_dir_x = push_dir_y = 0.0
+
         try:
             while True:
                 kin = self.get_sim_kinematics()
                 x_w = sim_to_api_distance(kin["location"][0]) + x0
                 y_w = sim_to_api_distance(kin["location"][1]) + y0
-
-                
 
                 qx, qy, qz, qw = kin["orientation"]
                 _, _, yaw = quat2euler((qw, qx, qy, qz), axes="sxyz")
@@ -321,21 +337,30 @@ class HighLevelSimClient:
                 dx = tgt_x - x_w
                 dy = tgt_y - y_w
 
-
                 err_x =  math.cos(yaw) * dx + math.sin(yaw) * dy
                 err_y = -math.sin(yaw) * dx + math.cos(yaw) * dy
 
-
-
                 # ========= POSITION → VELOCITY =========
-                #v_fwd_target  = KP_POS * err_x
-                #v_left_target = KP_POS * err_y
                 pid_px.update_control(err_x)
                 pid_py.update_control(err_y)
 
                 v_fwd_target = pid_px.get_control()
                 v_left_target = pid_py.get_control()
                 
+                # === ДОБАВЛЯЕМ НАЧАЛЬНЫЙ ИМПУЛЬС ===
+                if initial_push_active:
+                    elapsed = mono() - push_start_time
+                    if elapsed < PUSH_DURATION:
+                        # Экспоненциальное затухание импульса
+                        decay_factor = math.exp(-3.0 * elapsed / PUSH_DURATION)  # Быстрое затухание
+                        push_strength = INITIAL_PUSH * decay_factor
+                        
+                        # Добавляем импульс в направлении цели
+                        v_fwd_target += push_dir_x * push_strength
+                        v_left_target += push_dir_y * push_strength
+                    else:
+                        initial_push_active = False  # Отключаем импульс после завершения
+
                 # accel limiting
                 dv_fwd  = max(-A_MAX * PERIOD, min(v_fwd_target  - v_fwd_target_prev,  A_MAX * PERIOD))
                 dv_left = max(-A_MAX * PERIOD, min(v_left_target - v_left_target_prev, A_MAX * PERIOD))
@@ -368,38 +393,30 @@ class HighLevelSimClient:
                 u_fwd  = pid_vx.get_control()
                 u_left = pid_vy.get_control()
 
+
+
                 pitch_pwm = vel_to_rc_signal(u_fwd)
-                roll_pwm  = vel_to_rc_signal(-u_left)  # <-- ЛЕВАЯ СК, СОХРАНЕНО
+                roll_pwm  = vel_to_rc_signal(-u_left)
 
                 self._rpy_vel_data = (roll_pwm, pitch_pwm, 1500)
 
                 location_error = math.sqrt((dx**2) + (dy**2))
                 velocity_error = math.sqrt((vx_w**2) + (vy_w**2))
+                
                 # ========= EXIT =========
                 if (
                     location_error < POS_THR and
                     velocity_error < VEL_THR
                 ):
-                    self._soft_stop_xy(duration=4, rate_hz=50, profile="tanh")
-                    print(f"[STAT] X_errror = {dx:.3}, Y_errror = {dy:.3}")
-                    print(f"[STAT] Error {location_error} < THR {POS_THR}")
-
-                    '''kin_validation = self.get_sim_kinematics()
-
-                    velocity_error_validation = math.sqrt((abs(kin_validation["linear_velocity"][0])**2) + (abs(kin_validation["linear_velocity"][1])**2))
-                    
-                    x_error_validation = abs(x - kin["location"][0])
-                    y_error_validation = abs(y - kin["location"][1])
-
-                    location_error_validation = math.sqrt((x_error_validation**2) + (y_error_validation**2))
-                    if (
-                        location_error_validation < POS_THR and
-                        velocity_error_validation < VEL_THR
-                    ):'''
+                    #self._soft_stop_xy(duration=4, rate_hz=50, profile="tanh")
+                    self._rpy_vel_data = (1500, 1500, 1500)
+                    print(f"[STAT] X_error = {dx:.3f}, Y_error = {dy:.3f}")
+                    print(f"[STAT] Error {location_error:.3f} < THR {POS_THR}")
                     return True
 
                 if mono() > deadline:
-                    self._soft_stop_xy(duration=5, rate_hz=50 , profile="tanh")
+                    #self._soft_stop_xy(duration=5, rate_hz=50, profile="tanh")
+                    self._rpy_vel_data = (1500, 1500, 1500)
                     return False
 
                 next_t += PERIOD
@@ -408,7 +425,7 @@ class HighLevelSimClient:
                     time.sleep(sleep_time)
 
         finally:
-            self._soft_stop_xy(duration=5, rate_hz=50 , profile="tanh")
+            pass
 
     def _flush_log_buffer(self, log_file, buffer):
         """Записывает буфер логов в файл"""
@@ -479,11 +496,15 @@ class HighLevelSimClient:
                 # завершение
                 if abs(err) < TOL:
                     r, p, _ = self._rpy_vel_data
-                    self._rpy_vel_data = (r, p, 1500)            # отпустить руддер
+                    self._rpy_vel_data = (r, p, 1500)    # отпустить руддер
+                    
+                    time.sleep(1.0)         
                     return True
                 if mono() > deadline:
                     r, p, _ = self._rpy_vel_data
                     self._rpy_vel_data = (r, p, 1500)
+                    
+                    time.sleep(1.0)
                     return False
 
                 # PID -> угловая скорость (рад/с), внутри уже есть сатурация MAX_RATE
@@ -503,6 +524,8 @@ class HighLevelSimClient:
             # гарантированно нейтраль по yaw
             r, p, _ = self._rpy_vel_data
             self._rpy_vel_data = (r, p, 1500)
+        
+        
 
     def _wrap(self, a: float) -> float:  # на будущее (не обязателен)
         return (a + math.pi) % (2*math.pi) - math.pi
@@ -530,9 +553,9 @@ class HighLevelSimClient:
         # ---- жёсткие настройки ----
         PERIOD        = 0.05      # 20 Гц
         MIN_H         = 0.00
-        TAKEOFF_H     = 1.00
+        TAKEOFF_H     = 0.75
         MAX_H         = 5.00
-        REACH_COEF    = 0.70      # считаем «достигли», если >= 70% цели
+        REACH_COEF    = 0.95      # считаем «достигли», если >= 70% цели
         TIMEOUT_COEF  = 10.0      # с/м
         # ---------------------------
 
@@ -564,7 +587,7 @@ class HighLevelSimClient:
         PERIOD        = 0.05      # 20 Гц
         MIN_H         = 0.00
         MAX_H         = 5.00
-        STEP          = 0.005      # м за шаг сетпоинта
+        STEP          = 0.0025      # м за шаг сетпоинта
         TIMEOUT_MIN   = 15.0      # базовый таймаут
         TIMEOUT_COEF  = 10.0      # доп. таймаут пропорционален высоте
         # ---------------------------
@@ -598,8 +621,8 @@ class HighLevelSimClient:
         PERIOD        = 0.05
         MIN_H         = 0.00
         MAX_H         = 5.00
-        STEP          = 0.01
-        REACH_COEF    = 0.70
+        STEP          = 0.0025
+        REACH_COEF    = 0.95
         TIMEOUT_MIN   = 15.0
         TIMEOUT_COEF  = 10.0
         # ---------------------------
