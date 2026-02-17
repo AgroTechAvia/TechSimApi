@@ -29,7 +29,7 @@ if __name__ == "__main__":
 class HighLevelSimClient:
     def __init__(self): 
 
-        self.__alt_pid = PID(2.25, 0.015, 7)
+        self.__alt_pid = PID(2.5, 0.017, 7)
         
         self._odom = (0.0, 0.0)
 
@@ -219,59 +219,60 @@ class HighLevelSimClient:
         # ========= PARAMETERS =========
         PERIOD = 1 / 50.0
 
-        POS_THR = 0.08
-        VEL_THR = 0.00075
+        POS_THR = 0.125
+        VEL_THR = 0.00025
 
         T_MIN = 1.15
         T_MAX = 60.0
 
-        POS_MAX = 1.35
+        POS_CONTROL_MAX = 1.35
 
         # Начальный импульс для преодоления инерции
-        initial_push_active = True
+        initial_push_active = False
         INITIAL_PUSH = 17  # Сила толчка (м/с). Настройте: 0.15-0.35 для разных дронов
         PUSH_DURATION = 1.15 # Длительность импульса в секундах
 
-        KP_POS = 1.28
+        KP_POS = 1.17
         KI_POS = 0
-        KD_POS = 7.2
+        KD_POS = 8.75
         I_LIMIT_POS = 0.0001
 
         pid_px = PID(KP_POS, 
                     KI_POS, 
                     KD_POS,
-                    max_control=POS_MAX,
+                    max_control=POS_CONTROL_MAX,
                     i_limit=I_LIMIT_POS)
 
         pid_py = PID(KP_POS, 
                     KI_POS, 
                     KD_POS,
-                    max_control=POS_MAX,
+                    max_control=POS_CONTROL_MAX,
                     i_limit=I_LIMIT_POS)
 
         pid_px.reset()
         pid_py.reset()
 
         # --- Velocity loop ---
-        KP_VEL = 7.73
+        KP_VEL = 4.0
         KI_VEL = 0.001
         KD_VEL = 7.14
 
         I_LIMIT_VEL = 0.13
 
-        V_MAX = 1.03
-        A_MAX = 20 
+        V_CONTROL_MAX = 1.5
+        V_MAX = 0.45
+        A_MAX = 7.4 
 
         pid_vx = PID(KP_VEL, 
                     KI_VEL, 
                     KD_VEL,
-                    max_control=V_MAX,
+                    max_control=V_CONTROL_MAX,
                     i_limit=I_LIMIT_VEL)
 
         pid_vy = PID(KP_VEL, 
                     KI_VEL, 
                     KD_VEL,
-                    max_control=V_MAX,
+                    max_control=V_CONTROL_MAX,
                     i_limit=I_LIMIT_VEL)
 
         pid_vx.reset()

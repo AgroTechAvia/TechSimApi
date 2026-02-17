@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agrotechsimapi"
-version = "1.0.1"
+version = "1.0.2"
 authors = [
   { name="AgroTechAvia", email="example@main.com" },
 ]
