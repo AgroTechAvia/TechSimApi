@@ -288,6 +288,10 @@ class SimClient():
         
         self.rpc_client.call('setLedState', led_id, new_state)
 
+    def set_Diod(self,
+                 led_id, r, g, b):
+        return self.rpc_client.call("setDiod", led_id, r, g, b)
+
     def get_kinametics_data(self):
 
         return self.rpc_client.call("getKinematicsData")

@@ -15,9 +15,6 @@ import time
 import math
 import threading  # Добавлен импорт
 
-import matplotlib.pyplot as plt
-from collections import deque
-
 def main():
     pass
 
@@ -29,7 +26,7 @@ if __name__ == "__main__":
 class HighLevelSimClient:
     def __init__(self): 
 
-        self.__alt_pid = PID(2.5, 0.017, 7)
+        self.__alt_pid = PID(3, 0.015, 5)
         
         self._odom = (0.0, 0.0)
 
@@ -55,7 +52,14 @@ class HighLevelSimClient:
         
         # Блокировка для безопасного доступа к клиенту из нескольких потоков
         self._client_lock = threading.Lock()
-        
+
+        # ===== МЕХАНИЗМ ОТСЛЕЖИВАНИЯ СМЕРТИ СИМУЛЯТОРА =====
+        self._consecutive_errors = 0          # Счётчик последовательных ошибок
+        self._error_threshold = 2             # Порог для определения "смерти" симулятора
+        self._simulator_alive = True          # Флаг живости симулятора
+        self._on_death_callback = None        # Колбэк для обработки смерти симулятора
+        # =================================================  
+
         print("process started")
 
     def connect(self, ip, port):
@@ -90,14 +94,16 @@ class HighLevelSimClient:
         self._image_processing_timer.start()
 
         time.sleep(1)
-        self._armed_flag = True
-        self._arm_data = 2000
+        self._armed_flag = False
+        self._arm_data = 1000
         time.sleep(1)
-        self._poshold_flag = True
-        self._nav_mode = 1500
+        self._poshold_flag = False
+        self._nav_mode = 1000
 
 
     def disconnect(self):
+        print("===DISCONECT===")
+
         self._sim_kinematics_timer.stop()
         self._height_timer.stop()
         self._rc_timer.stop()
@@ -121,10 +127,12 @@ class HighLevelSimClient:
         return x_w - x0, y_w - y0
     
     def getHeightRange(self):
-        return self._altitude
+        with self._client_lock:
+            return self._altitude
     
     def getHeightBarometer(self):
-        return self._altitude
+        with self._client_lock:
+            return self._altitude
     
     def getArm(self):
         return self._armed_flag
@@ -141,7 +149,8 @@ class HighLevelSimClient:
         return True
     
     def getUltrasonic(self):
-        return self._sim_ultrasonic
+        with self._client_lock:
+            return self._sim_ultrasonic
 
 
         
@@ -220,59 +229,59 @@ class HighLevelSimClient:
         PERIOD = 1 / 50.0
 
         POS_THR = 0.125
-        VEL_THR = 0.00025
+        VEL_THR = 0.0125
 
         T_MIN = 1.15
         T_MAX = 60.0
 
-        POS_CONTROL_MAX = 1.35
+        POS_MAX_CONTROL = 1.35
 
         # Начальный импульс для преодоления инерции
         initial_push_active = False
-        INITIAL_PUSH = 17  # Сила толчка (м/с). Настройте: 0.15-0.35 для разных дронов
-        PUSH_DURATION = 1.15 # Длительность импульса в секундах
+        INITIAL_PUSH = 5  # Сила толчка (м/с). Настройте: 0.15-0.35 для разных дронов
+        PUSH_DURATION = 0.5 # Длительность импульса в секундах
 
-        KP_POS = 1.17
+        KP_POS = 1.055
         KI_POS = 0
-        KD_POS = 8.75
+        KD_POS = 7.15
         I_LIMIT_POS = 0.0001
 
         pid_px = PID(KP_POS, 
                     KI_POS, 
                     KD_POS,
-                    max_control=POS_CONTROL_MAX,
+                    max_control=POS_MAX_CONTROL,
                     i_limit=I_LIMIT_POS)
 
         pid_py = PID(KP_POS, 
                     KI_POS, 
                     KD_POS,
-                    max_control=POS_CONTROL_MAX,
+                    max_control=POS_MAX_CONTROL,
                     i_limit=I_LIMIT_POS)
 
         pid_px.reset()
         pid_py.reset()
 
         # --- Velocity loop ---
-        KP_VEL = 4.0
-        KI_VEL = 0.001
-        KD_VEL = 7.14
+        KP_VEL = 7.5
+        KI_VEL = 0.00001
+        KD_VEL = 6.0
 
-        I_LIMIT_VEL = 0.13
+        I_LIMIT_VEL = 0.001
 
-        V_CONTROL_MAX = 1.5
-        V_MAX = 0.45
-        A_MAX = 7.4 
+        V_MAX_CONTROL = 1.55
+        V_MAX = 0.24
+        A_MAX = 7.4
 
         pid_vx = PID(KP_VEL, 
                     KI_VEL, 
                     KD_VEL,
-                    max_control=V_CONTROL_MAX,
+                    max_control=V_MAX_CONTROL,
                     i_limit=I_LIMIT_VEL)
 
         pid_vy = PID(KP_VEL, 
                     KI_VEL, 
                     KD_VEL,
-                    max_control=V_CONTROL_MAX,
+                    max_control=V_MAX_CONTROL,
                     i_limit=I_LIMIT_VEL)
 
         pid_vx.reset()
@@ -554,9 +563,9 @@ class HighLevelSimClient:
         # ---- жёсткие настройки ----
         PERIOD        = 0.05      # 20 Гц
         MIN_H         = 0.00
-        TAKEOFF_H     = 0.75
+        TAKEOFF_H     = 0.5
         MAX_H         = 5.00
-        REACH_COEF    = 0.95      # считаем «достигли», если >= 70% цели
+        REACH_COEF    = 0.97      # считаем «достигли», если >= 70% цели
         TIMEOUT_COEF  = 10.0      # с/м
         # ---------------------------
 
@@ -588,7 +597,7 @@ class HighLevelSimClient:
         PERIOD        = 0.05      # 20 Гц
         MIN_H         = 0.00
         MAX_H         = 5.00
-        STEP          = 0.0025      # м за шаг сетпоинта
+        STEP          = 0.005      # м за шаг сетпоинта
         TIMEOUT_MIN   = 15.0      # базовый таймаут
         TIMEOUT_COEF  = 10.0      # доп. таймаут пропорционален высоте
         # ---------------------------
@@ -609,6 +618,9 @@ class HighLevelSimClient:
                 return False
 
         # На земле — успех (ждать фактического нуля не обязательно: контур дотянет сам)
+        # Сбрасываем PID и целевую высоту для подготовки к следующему взлету
+        self._target_height = 0.0
+        self.__alt_pid.reset()
         return True
 
     def setHeight(self, target_height: float) -> bool:
@@ -622,8 +634,8 @@ class HighLevelSimClient:
         PERIOD        = 0.05
         MIN_H         = 0.00
         MAX_H         = 5.00
-        STEP          = 0.0025
-        REACH_COEF    = 0.95
+        STEP          = 0.005
+        REACH_COEF    = 0.97
         TIMEOUT_MIN   = 15.0
         TIMEOUT_COEF  = 10.0
         # ---------------------------
@@ -694,10 +706,16 @@ class HighLevelSimClient:
     def armDrone(self):
         self._armed_flag = True
         self._arm_data = 2000
+        # Сбрасываем throttle на нейтральное значение при арминге
+        self._throttle_data = 1000
+        # Сбрасываем PID высоты для чистого старта
+        self.__alt_pid.reset()
 
     def disarmDrone(self):
         self._armed_flag = False
         self._arm_data = 1000
+        # При дизарме сбрасываем throttle
+        self._throttle_data = 1000
 
     def initDrone(self):
         self._rpy_vel_data = (1500, 1500, 1500)
@@ -713,6 +731,10 @@ class HighLevelSimClient:
     def posholdOff(self):
         self._poshold_flag = False
         self._nav_mode = 1000
+        # При выключении poshold сбрасываем throttle на нейтраль
+        self._throttle_data = 1000
+        # Сбрасываем PID высоты
+        self.__alt_pid.reset()
 
     def clamp_rc(self, data):
         return max(min(data, 2000), 1000)
@@ -728,8 +750,9 @@ class HighLevelSimClient:
         self.__alt_pid.reset()
 
     #new
-    def getImage(self): 
-        return self._sim_img
+    def getImage(self):
+        with self._client_lock: 
+            return self._sim_img
     
     def getArucos(self): 
         return self._aruco_data
@@ -772,13 +795,21 @@ class HighLevelSimClient:
             else:
                 self._blob_img = resolution_changes(blob_img, (640, 480))
 
-    def setDiod(self, r, g, b):
+    def setDiod(self,led_id, r, g, b):
         # Используем блокировку при обращении к клиенту
         with self._client_lock:
-            return self._client.set_Diod(float(r), float(g), float(b))
+            self._client.set_Diod(int(led_id), float(r), float(g), float(b))
         
     def setShoot(self, time):
         with self._client_lock:
             return self._client.call_event_action()
+
+    def set_simulator_death_callback(self, callback):
+        """Установить колбэк, вызываемый при обнаружении смерти симулятора"""
+        self._on_death_callback = callback
+
+    def is_simulator_alive(self):
+        """Проверить, жив ли симулятор"""
+        return self._simulator_alive
 
 
