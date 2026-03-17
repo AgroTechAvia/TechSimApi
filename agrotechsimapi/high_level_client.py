@@ -13,7 +13,8 @@ from transforms3d.euler import quat2euler
 
 import time
 import math
-import threading  # Добавлен импорт
+import threading
+import logging  # Для логирования ошибок
 
 def main():
     pass
@@ -108,6 +109,8 @@ class HighLevelSimClient:
         self._height_timer.stop()
         self._rc_timer.stop()
         self._image_processing_timer.stop() #new
+        self.disarmDrone()
+        self.posholdOff()
 
 
     def _world_xy(self, kin=None) -> tuple[float, float]:
@@ -155,18 +158,27 @@ class HighLevelSimClient:
 
         
     def calculate_height_rc(self):
-        self._altitude = sim_to_api_distance(self.get_sim_kinematics()["location"][2])
+        """Расчет throttle для удержания высоты"""
+        # Не обновляем, если симулятор мертв
+        if not self._simulator_alive:
+            return
+        
+        try:
+            self._altitude = sim_to_api_distance(self.get_sim_kinematics()["location"][2])
 
-        error = self._target_height - self._altitude
-        # print(f"target height: {self._target_height}, error: {error}")
+            error = self._target_height - self._altitude
+            # print(f"target height: {self._target_height}, error: {error}")
 
-        self.__alt_pid.update_control(error)
-        alt_rc_output = self.__alt_pid.get_control()
+            self.__alt_pid.update_control(error)
+            alt_rc_output = self.__alt_pid.get_control()
 
-        throttle_output = self.clamp_rc(1500 + alt_rc_output * 100)
+            throttle_output = self.clamp_rc(1500 + alt_rc_output * 100)
 
-        if self._armed_flag and self._poshold_flag:
-            self._throttle_data = throttle_output
+            if self._armed_flag and self._poshold_flag:
+                self._throttle_data = throttle_output
+        except Exception:
+            # Игнорируем ошибки, если симулятор мертв
+            pass
 
     def getRPY(self):
         kin = self.get_sim_kinematics()
@@ -673,11 +685,91 @@ class HighLevelSimClient:
 
 
     def sim_kinematics_callback(self):
-        # Используем блокировку при обращении к клиенту
-        with self._client_lock:
-            self._sim_kinematics = self._client.get_kinametics_data()
-            self._sim_img = self._client.get_camera_capture(camera_id=1) #выбор камеры 0-передняя 1-нижняя
-            self._sim_ultrasonic = self._client.get_range_data(rangefinder_id = 0, range_min = 0.15, range_max = 4, is_clear = True, range_error = 0.0003) * 100
+        """
+        Callback для обновления данных кинематики и изображений.
+        Включает проверку ошибок для обнаружения смерти симулятора.
+        """
+        # Не обновляем, если симулятор уже мертв
+        if not self._simulator_alive:
+            return
+        
+        should_check_death = True
+        
+        try:
+            # Используем блокировку при обращении к клиенту
+            with self._client_lock:
+                # Проверяем доступность клиента
+                if not hasattr(self, '_client') or self._client is None:
+                    self._consecutive_errors += 1
+                    should_check_death = True
+                    
+                else:
+                    # Получаем данные с обработкой ошибок
+                    try:
+                        self._sim_kinematics = self._client.get_kinametics_data()
+                        self._sim_img = self._client.get_camera_capture(camera_id=0)
+                        self._sim_ultrasonic = self._client.get_range_data(
+                            rangefinder_id=0,
+                            range_min=0.15,
+                            range_max=4,
+                            is_clear=True,
+                            range_error=0.0003
+                        ) * 100
+                        
+                        # Успешное получение данных - сбрасываем счетчик ошибок
+                        self._consecutive_errors = 0
+                        self._simulator_alive = True
+                        
+                    except Exception as e:
+                        # Ошибка при получении данных
+                        self._consecutive_errors += 1
+                        logger = logging.getLogger(__name__)
+                        logger.warning(f"Error getting simulator data: {e}")
+                        should_check_death = True
+                        
+        except Exception as e:
+            # Критическая ошибка
+            self._consecutive_errors += 1
+            logger = logging.getLogger(__name__)
+            logger.error(f"Critical error in sim_kinematics_callback: {e}")
+            should_check_death = True
+        
+        # Проверяем смерть симулятора ПОСЛЕ выхода из блокировки
+        if should_check_death:
+            self._check_simulator_death()
+    
+    def _check_simulator_death(self):
+        """Проверка на смерть симулятора и вызов колбэка"""
+        if self._consecutive_errors >= self._error_threshold:
+            self._simulator_alive = False
+            logger = logging.getLogger(__name__)
+            logger.error(f"Simulator death detected! Consecutive errors: {self._consecutive_errors}")
+            
+            # Сначала останавливаем все таймеры, чтобы предотвратить дальнейшие ошибки
+            logger.error("Stopping all timers...")
+            self._stop_all_timers()
+
+            if self._on_death_callback is not None:
+                logger.error("Calling simulator death callback...")
+                try:
+                    self._on_death_callback()
+                except Exception as e:
+                    logger.error(f"Error in death callback: {e}")
+    
+    def _stop_all_timers(self):
+        """Останавливает все таймеры для предотвращения дальнейших ошибок"""
+        try:
+            if hasattr(self, '_height_timer') and self._height_timer is not None:
+                self._height_timer.stop()
+            if hasattr(self, '_rc_timer') and self._rc_timer is not None:
+                self._rc_timer.stop()
+            if hasattr(self, '_sim_kinematics_timer') and self._sim_kinematics_timer is not None:
+                self._sim_kinematics_timer.stop()
+            if hasattr(self, '_image_processing_timer') and self._image_processing_timer is not None:
+                self._image_processing_timer.stop()
+        except Exception as e:
+            # Игнорируем ошибки при остановке таймеров (могут быть, если вызываем из текущего таймера)
+            pass
 
 
     def get_sim_kinematics(self):
@@ -685,11 +777,20 @@ class HighLevelSimClient:
     
 
     def transmit_rc_to_sim(self):
+        """Отправка RC команд в симулятор"""
+        # Не отправляем, если симулятор мертв
+        if not self._simulator_alive:
+            return
+            
         roll, pitch, yaw = self._rpy_vel_data
         raw_rc = [roll, pitch, self._throttle_data, yaw, self._arm_data, self._fliyng_mode, self._nav_mode]
         raw_rc = self.clamp_rc_list(raw_rc)
-        msg = self._control.send_RAW_RC(raw_rc)
-        data_handler = self._control.receive_msg()
+        try:
+            msg = self._control.send_RAW_RC(raw_rc)
+            data_handler = self._control.receive_msg()
+        except Exception:
+            # Игнорируем ошибки при отправке, если симулятор мертв
+            pass
 
     def setVelXY(self, x, y):
         rpy = self._rpy_vel_data
