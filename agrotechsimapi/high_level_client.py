@@ -1,10 +1,22 @@
-from inavmspapi import MultirotorControl  
-from inavmspapi.transmitter import TCPTransmitter  
+"""
+HighLevelSimClient - клиент высокого уровня для управления дроном в симуляторе TechSim.
+
+Реализует каскадное PID-управление с двумя режимами:
+- position: полет в заданную точку (позиция → скорость → PWM)
+- velocity: движение с заданной скоростью (скорость → PWM)
+
+Архитектура:
+- PID-регуляторы работают постоянно в фоновых коллбэках (50 Гц)
+- PosHold включается только при взлете, посадке и удержании позиции
+- Асинхронные операции для неблокирующего управления
+"""
+from inavmspapi import MultirotorControl
+from inavmspapi.transmitter import TCPTransmitter
 from inavmspapi.msp_codes import MSPCodes
 from agrotechsimapi.client import SimClient
 
 from agrotechsimapi.pid import PID, AdaptivePID
-from typing import Iterable
+from typing import Iterable, Optional, Tuple, Literal
 
 from agrotechsimapi.utils.utils import LoopingTimer, sim_to_api_distance, vel_to_rc_signal
 from agrotechsimapi.utils.vision import process_aruco, process_blob, resolution_changes
@@ -14,7 +26,13 @@ from transforms3d.euler import quat2euler
 import time
 import math
 import threading
-import logging  # Для логирования ошибок
+import logging
+import asyncio
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 def main():
     pass
@@ -25,104 +43,389 @@ if __name__ == "__main__":
 
 
 class HighLevelSimClient:
-    def __init__(self): 
-
-        self.__alt_pid = PID(3, 0.015, 5)
+    """
+    Клиент высокого уровня для управления дроном в симуляторе TechSim.
+    
+    Реализует:
+    - Каскадное PID-управление (позиция → скорость → PWM)
+    - Два режима управления: position и velocity
+    - Фоновые коллбэки для yaw и горизонтального движения (50 Гц)
+    - Обнаружение смерти симулятора
+    - Взлет, посадка, перемещение в точку
+    """
+    
+    # Типы режимов управления
+    ControlMode = Literal["position", "velocity"]
+    
+    def __init__(self):
+        # ===== ПИД-РЕГУЛЯТОРЫ (горизонтальное движение) =====
+        # Позиция → Скорость
+        self._pid_pos_x = PID(kp=1.055, ki=0, kd=7.15, max_control=1.35, i_limit=0.0001)
+        self._pid_pos_y = PID(kp=1.055, ki=0, kd=7.15, max_control=1.35, i_limit=0.0001)
+        
+        # Скорость → PWM
+        self._pid_vel_x = PID(kp=7.5, ki=0.00001, kd=6.0, max_control=1.55, i_limit=0.001)
+        self._pid_vel_y = PID(kp=7.5, ki=0.00001, kd=6.0, max_control=1.55, i_limit=0.001)
+        
+        # Yaw PID
+        self._pid_yaw = PID(kp=3.5, ki=0.001, kd=0.4, max_control=1.0, i_limit=None)
+        
+        # ===== ПИД-регулятор высоты =====
+        #self.__alt_pid = PID(3, 0.015, 5)
+        self.__alt_pid = PID(0.1, 0.0, 3)
+        # ===== ПЕРЕМЕННЫЕ СОСТОЯНИЯ =====
+        self._control_mode = " position" #: self.ControlMode = "velocity"  # По умолчанию velocity
+        self._target_position = (0.0, 0.0)  # Целевая позиция (x, y)
+        self._target_velocity = (0.0, 0.0)  # Целевая скорость (vx, vy)
+        self._target_yaw = 0.0  # Целевой угол поворота
         
         self._odom = (0.0, 0.0)
-
         self._altitude = 0.0
-
         self._target_height = 0.0
-
+        
         self._armed_flag = False
         self._poshold_flag = False
-
-        self._sim_img = None 
-        self._blob_img = None 
-        self._aruco_img = None 
-        self._aruco_data = [] 
-        self._camera_pose_aruco_data = [] 
+        
+        self._sim_img = None
+        self._blob_img = None
+        self._aruco_img = None
+        self._aruco_data = []
+        self._camera_pose_aruco_data = []
         self._blob_data = []
-
-        self._odom0_xy = (0.0, 0.0)   # (x0, y0) в мировой СК на момент «сброса одометрии»
-
+        
+        self._odom0_xy = (0.0, 0.0)  # (x0, y0) в мировой СК на момент «сброса одометрии»
+        
         self._sim_kinematics = None
-
         self._sim_ultrasonic = None
         
-        # Блокировка для безопасного доступа к клиенту из нескольких потоков
+        # ===== Блокировки =====
         self._client_lock = threading.Lock()
-
+        
         # ===== МЕХАНИЗМ ОТСЛЕЖИВАНИЯ СМЕРТИ СИМУЛЯТОРА =====
-        self._consecutive_errors = 0          # Счётчик последовательных ошибок
-        self._error_threshold = 2             # Порог для определения "смерти" симулятора
-        self._simulator_alive = True          # Флаг живости симулятора
-        self._on_death_callback = None        # Колбэк для обработки смерти симулятора
-        # =================================================  
-
+        self._consecutive_errors = 0
+        self._error_threshold = 2
+        self._simulator_alive = True
+        self._on_death_callback = None
+        # =================================================
+        
         print("process started")
-
+    
     def connect(self, ip, port):
+        """Подключение к симулятору"""
         self.__HOST = ip
         self.__SIM_PORT = 8080
         self.__TCP_PORT = 5762
         self.__TCP_ADDRESS = (self.__HOST, self.__TCP_PORT)
-
         
-
         self.__tcp_transmitter = TCPTransmitter(self.__TCP_ADDRESS)
         self.__tcp_transmitter.connect()
         self._control = MultirotorControl(self.__tcp_transmitter)
         time.sleep(2)
-
+        
         # Инициализируем клиент с блокировкой
         with self._client_lock:
             self._client = SimClient(address=self.__HOST, port=self.__SIM_PORT)
-
-        self._height_timer = LoopingTimer(interval=1/50, callback=self.calculate_height_rc, name="height_timer")
+        
+        # Создаем таймеры
+        self._height_timer = LoopingTimer(interval=1/25, callback=self.calculate_height_rc, name="height_timer")
         self._rc_timer = LoopingTimer(interval=1/50, callback=self.transmit_rc_to_sim, name="rc_timer")
         self._sim_kinematics_timer = LoopingTimer(interval=1/50, callback=self.sim_kinematics_callback, name="sim_kinematics_timer")
-        self._image_processing_timer = LoopingTimer(interval=1/10, callback=self.image_processing_callback, name="image_processing_timer")   #new
-
+        self._image_processing_timer = LoopingTimer(interval=1/10, callback=self.image_processing_callback, name="image_processing_timer")
+        
+        # Новые фоновые коллбэки для управления
+        self._yaw_timer = LoopingTimer(interval=1/25, callback=self.yaw_callback, name="yaw_timer")
+        self._velocity_timer = LoopingTimer(interval=1/50, callback=self.velocity_callback, name="velocity_timer")
+        
         self.sim_kinematics_callback()
-
         self.initDrone()
-
+        
+        # Запускаем все таймеры
         self._sim_kinematics_timer.start()
         self._height_timer.start()
         self._rc_timer.start()
         self._image_processing_timer.start()
-
+        self._yaw_timer.start()
+        self._velocity_timer.start()
+        
         time.sleep(1)
         self._armed_flag = False
         self._arm_data = 1000
         time.sleep(1)
         self._poshold_flag = False
         self._nav_mode = 1000
-
-
+    
     def disconnect(self):
+        """Отключение от симулятора"""
         print("===DISCONECT===")
-
+        
+        # Останавливаем все таймеры
         self._sim_kinematics_timer.stop()
         self._height_timer.stop()
         self._rc_timer.stop()
-        self._image_processing_timer.stop() #new
+        self._image_processing_timer.stop()
+        self._yaw_timer.stop()
+        self._velocity_timer.stop()
+        
+        # Сбрасываем состояние
         self.disarmDrone()
         self.posholdOff()
-
-
+    
+    # =========================================================
+    # НОВЫЕ МЕТОДЫ УПРАВЛЕНИЯ (Этап 1)
+    # =========================================================
+    
+    def yaw_callback(self):
+        """
+        Фоновый коллбэк для управления yaw (50 Гц).
+        Постоянно регулирует yaw дрона к target_yaw.
+        """
+        if not self._simulator_alive:
+            return
+        
+        try:
+            current_yaw = self._get_yaw_cw()
+            error = self._target_yaw - current_yaw
+            error = self._wrap_pi(error)  # Нормализуем ошибку
+            
+            # Обновляем PID
+            self._pid_yaw.update_control(error)
+            yaw_rate = self._pid_yaw.get_control()
+            
+            # Конвертируем в PWM
+            yaw_pwm = vel_to_rc_signal(yaw_rate)
+            
+            # Обновляем только yaw, не трогая roll/pitch
+            r, p, _ = self._rpy_vel_data
+            self._rpy_vel_data = (r, p, yaw_pwm)
+            
+        except Exception as e:
+            logger.warning(f"Error in yaw_callback: {e}")
+    
+    def velocity_callback(self):
+        """
+        Фоновый коллбэк для каскадного управления скоростью (50 Гц).
+        
+        Контур 1: Позиция → Скорость (работает только в режиме position)
+        Контур 2: Скорость → PWM (работает всегда)
+        """
+        if not self._simulator_alive:
+            return
+        
+        try:
+            kin = self.get_sim_kinematics()
+            if kin is None:
+                return
+            
+            # Получаем текущую позицию и скорость
+            x_w = sim_to_api_distance(kin["location"][0])
+            y_w = sim_to_api_distance(kin["location"][1])
+            
+            # Вычисляем текущую скорость (простая разность позиций)
+            if hasattr(self, '_prev_x') and hasattr(self, '_prev_y'):
+                vx = (x_w - self._prev_x) * 50  # 50 Гц
+                vy = (y_w - self._prev_y) * 50
+            else:
+                vx = vy = 0.0
+            
+            self._prev_x = x_w
+            self._prev_y = y_w
+            
+            # ===== КОНТУР 1: Позиция → Скорость =====
+            if self._control_mode == "position":
+                # Вычисляем ошибку позиции
+                tx, ty = self._target_position
+                pos_error_x = tx - x_w
+                pos_error_y = ty - y_w
+                
+                # PID позиции выдает целевую скорость
+                self._pid_pos_x.update_control(pos_error_x)
+                self._pid_pos_y.update_control(pos_error_y)
+                
+                self._target_velocity = (
+                    self._pid_pos_x.get_control(),
+                    self._pid_pos_y.get_control()
+                )
+            
+            # ===== КОНТУР 2: Скорость → PWM =====
+            # Работает ВСЕГДА (и в position, и в velocity)
+            tvx, tvy = self._target_velocity
+            
+            # Ошибка скорости
+            vel_error_x = tvx - vx
+            vel_error_y = tvy - vy
+            
+            # PID скорости выдает PWM
+            self._pid_vel_x.update_control(vel_error_x)
+            self._pid_vel_y.update_control(vel_error_y)
+            
+            pitch_pwm = vel_to_rc_signal(self._pid_vel_x.get_control())
+            roll_pwm = vel_to_rc_signal(-self._pid_vel_y.get_control())
+            
+            # Обновляем roll/pitch, не трогая yaw
+            _, _, y = self._rpy_vel_data
+            self._rpy_vel_data = (roll_pwm, pitch_pwm, y)
+            
+        except Exception as e:
+            logger.warning(f"Error in velocity_callback: {e}")
+    
+    def set_velocity_xy(self, vx: float, vy: float):
+        """
+        Установить целевую скорость движения.
+        
+        Args:
+            vx: Скорость по оси X (м/с)
+            vy: Скорость по оси Y (м/с)
+        """
+        self._control_mode = "velocity"
+        self._target_velocity = (vx, vy)
+        #self.posholdOff()  # Выключаем PosHold
+    
+    def go_to_xy(self, frame: str, x: float, y: float, max_speed: float = 0.5) -> bool:
+        """
+        Полет в заданную точку.
+        
+        Args:
+            frame: Система координат ("odom" или "base_link")
+            x: Координата X (м)
+            y: Координата Y (м)
+            max_speed: Максимальная скорость (м/с)
+            
+        Returns:
+            True если достиг цели, False если таймаут
+        """
+        # 1. Сброс PID
+        self._pid_pos_x.reset()
+        self._pid_pos_y.reset()
+        self._pid_vel_x.reset()
+        self._pid_vel_y.reset()
+        
+        # 2. Включаем режим позиции
+        self._control_mode = "position"
+        
+        # 3. Вычисляем целевую позицию
+        kin = self.get_sim_kinematics()
+        if kin is None:
+            logger.error("No kinematics data for go_to_xy")
+            return False
+        
+        cx = sim_to_api_distance(kin["location"][0])
+        cy = sim_to_api_distance(kin["location"][1])
+        
+        if frame == "odom":
+            if self._odom0_xy != (0.0, 0.0):
+                x0, y0 = self._odom0_xy
+                self._target_position = (x0 + x, y0 + y)
+            else:
+                self._target_position = (x, y)
+        elif frame == "base_link":
+            _, _, yaw = self._get_yaw_cw()
+            self._target_position = (
+                cx + math.cos(yaw) * x - math.sin(yaw) * y,
+                cy + math.sin(yaw) * x + math.cos(yaw) * y
+            )
+        else:
+            raise ValueError("frame must be 'odom' or 'base_link'")
+        
+        # 4. Выключаем PosHold
+        #self.posholdOff()
+        
+        # 5. Ограничиваем максимальную скорость
+        self._pid_pos_x._max_control = max_speed
+        self._pid_pos_y._max_control = max_speed
+        
+        # 6. Ожидаем достижения цели
+        timeout = 60.0  # секунд
+        start_time = time.monotonic()
+        
+        while time.monotonic() - start_time < timeout:
+            if not self._simulator_alive:
+                logger.warning("Simulator died during go_to_xy")
+                self.posholdOn()
+                return False
+            
+            # Проверяем расстояние до цели
+            tx, ty = self._target_position
+            dist = math.hypot(tx - cx, ty - cy)
+            
+            if dist < 0.1:  # 5 см допуск
+                logger.info(f"Reached target: {x}, {y}")
+                self.posholdOn()  # Включаем PosHold после достижения
+                return True
+            
+            # Обновляем текущую позицию
+            kin = self.get_sim_kinematics()
+            if kin is not None:
+                cx = sim_to_api_distance(kin["location"][0])
+                cy = sim_to_api_distance(kin["location"][1])
+            
+            time.sleep(0.05)  # 20 Гц
+        
+        logger.warning(f"go_to_xy timeout: target={x}, {y}")
+        #self.posholdOn()  # Включаем PosHold при таймауте
+        return False
+    
+    def gotoXYodom(self, x: float, y: float) -> bool:
+        """Полет в точку в системе координат одометрии"""
+        return self.go_to_xy("odom", x, y)
+    
+    def gotoXYdrone(self, x: float, y: float) -> bool:
+        """Полет в точку в системе координат дрона"""
+        return self.go_to_xy("base_link", x, y)
+    
+    def setYaw(self, yaw: float) -> bool:
+        """
+        БЛОКИРУЮЩИЙ поворот до абсолютного угла.
+        
+        Args:
+            yaw: Целевой угол (радианы, по часовой стрелке)
+            
+        Returns:
+            True если достиг угла, False если таймаут
+        """
+        # Сброс PID
+        self._pid_yaw.reset()
+        
+        # Нормализуем цель
+        goal = self._wrap_pi(yaw)
+        
+        timeout = 10.0
+        start_time = time.monotonic()
+        tol = 0.025  # рад
+        self._target_yaw = goal
+        while time.monotonic() - start_time < timeout:
+            if not self._simulator_alive:
+                return False
+            
+            current = self._get_yaw_cw()
+            error = self._wrap_pi(goal - current)
+            
+            if abs(error) < tol:
+                # Достигли - центрируем yaw
+                r, p, _ = self._rpy_vel_data
+                self._rpy_vel_data = (r, p, 1500)
+                return True
+            
+            time.sleep(0.05)
+        
+        # Таймаут
+        r, p, _ = self._rpy_vel_data
+        self._rpy_vel_data = (r, p, 1500)
+        return False
+    
+    # =========================================================
+    # СУЩЕСТВУЮЩИЕ МЕТОДЫ (с минимальными изменениями)
+    # =========================================================
+    
     def _world_xy(self, kin=None) -> tuple[float, float]:
-        """Мировые координаты XY в твоей API-конвенции."""
+        """Мировые координаты XY"""
         if kin is None:
             kin = self.get_sim_kinematics()
         x_w = sim_to_api_distance(kin["location"][0])
         y_w = sim_to_api_distance(kin["location"][1])
         return x_w, y_w
-
+    
     def _odom_xy(self, kin=None) -> tuple[float, float]:
-        """Одометрия (XY), отн. сохранённого нуля. Если ноль не задан — возвращаем мировые XY."""
+        """Одометрия (XY)"""
         x_w, y_w = self._world_xy(kin)
         if self._odom0_xy == (0.0, 0.0):
             return x_w, y_w
@@ -141,320 +444,40 @@ class HighLevelSimClient:
         return self._armed_flag
     
     def setZeroOdomOpticflow(self) -> bool:
-        """
-        Запомнить текущие мировые координаты (x0,y0) как ноль одометрии.
-        Дальше frame='odom' трактуется как координаты относительно этого нуля.
-        """
+        """Сброс одометрии"""
         kin = self.get_sim_kinematics()
         if kin is None:
-            raise RuntimeError("Нет кэша кинематики: setZeroOdomOpticflow() вызван слишком рано")
+            raise RuntimeError("Нет кэша кинематики")
         self._odom0_xy = self._world_xy(kin)
         return True
     
     def getUltrasonic(self):
         with self._client_lock:
             return self._sim_ultrasonic
-
-
-        
+    
     def calculate_height_rc(self):
         """Расчет throttle для удержания высоты"""
-        # Не обновляем, если симулятор мертв
         if not self._simulator_alive:
             return
         
         try:
             self._altitude = sim_to_api_distance(self.get_sim_kinematics()["location"][2])
-
             error = self._target_height - self._altitude
-            # print(f"target height: {self._target_height}, error: {error}")
-
             self.__alt_pid.update_control(error)
             alt_rc_output = self.__alt_pid.get_control()
-
-            throttle_output = self.clamp_rc(1500 + alt_rc_output * 100)
-
-            if self._armed_flag and self._poshold_flag:
+            throttle_output = self.clamp_rc(1290 + alt_rc_output * 100)
+            
+            if self._armed_flag: #and self._poshold_flag:
                 self._throttle_data = throttle_output
         except Exception:
-            # Игнорируем ошибки, если симулятор мертв
             pass
-
+    
     def getRPY(self):
         kin = self.get_sim_kinematics()
         qx, qy, qz, qw = kin["orientation"]
         roll, pitch, yaw = quat2euler((qw, qx, qy, qz), axes='sxyz')
         return [roll, pitch, yaw]
-
-    def _soft_stop_xy(self, duration=0.5, rate_hz=50, profile="smoothstep"):
-        """
-        Плавно сводит roll/pitch PWM к 1500 за duration секунд
-        с нелинейным профилем.
-        
-        profile:
-            "linear"
-            "smoothstep"
-            "tanh"
-        """
-        steps = max(1, int(duration * rate_hz))
-        dt = 1.0 / rate_hz
-
-        start_roll, start_pitch, _ = self._rpy_vel_data
-        target = 1500
-
-        def ease(x):
-            x = max(0.0, min(1.0, x))
-            if profile == "linear":
-                return x
-            elif profile == "smoothstep":
-                return x * x * (3 - 2 * x)
-            elif profile == "tanh":
-                k = 3.0
-                return math.tanh(k * x) / math.tanh(k)
-            else:
-                raise ValueError(f"Unknown profile: {profile}")
-
-        for i in range(steps):
-            t = (i + 1) / steps
-            a = ease(t)
-
-            roll  = int(start_roll  + a * (target - start_roll))
-            pitch = int(start_pitch + a * (target - start_pitch))
-
-            self._rpy_vel_data = (roll, pitch, target)
-            time.sleep(dt)
-
-        self._rpy_vel_data = (target, target, target)
     
-    def go_to_xy(self, frame: str, x: float, y: float) -> bool:
-        # ========= FRAME =========
-        if frame == "odom":
-            use_body_shift = False
-            use_odom_frame = True
-        elif frame == "base_link":
-            use_body_shift = True
-            use_odom_frame = False
-        else:
-            raise ValueError("frame must be 'odom' or 'base_link'")
-
-        # ========= PARAMETERS =========
-        PERIOD = 1 / 50.0
-
-        POS_THR = 0.125
-        VEL_THR = 0.0125
-
-        T_MIN = 1.15
-        T_MAX = 60.0
-
-        POS_MAX_CONTROL = 1.35
-
-        # Начальный импульс для преодоления инерции
-        initial_push_active = False
-        INITIAL_PUSH = 5  # Сила толчка (м/с). Настройте: 0.15-0.35 для разных дронов
-        PUSH_DURATION = 0.5 # Длительность импульса в секундах
-
-        KP_POS = 1.055
-        KI_POS = 0
-        KD_POS = 7.15
-        I_LIMIT_POS = 0.0001
-
-        pid_px = PID(KP_POS, 
-                    KI_POS, 
-                    KD_POS,
-                    max_control=POS_MAX_CONTROL,
-                    i_limit=I_LIMIT_POS)
-
-        pid_py = PID(KP_POS, 
-                    KI_POS, 
-                    KD_POS,
-                    max_control=POS_MAX_CONTROL,
-                    i_limit=I_LIMIT_POS)
-
-        pid_px.reset()
-        pid_py.reset()
-
-        # --- Velocity loop ---
-        KP_VEL = 7.5
-        KI_VEL = 0.00001
-        KD_VEL = 6.0
-
-        I_LIMIT_VEL = 0.001
-
-        V_MAX_CONTROL = 1.55
-        V_MAX = 0.24
-        A_MAX = 7.4
-
-        pid_vx = PID(KP_VEL, 
-                    KI_VEL, 
-                    KD_VEL,
-                    max_control=V_MAX_CONTROL,
-                    i_limit=I_LIMIT_VEL)
-
-        pid_vy = PID(KP_VEL, 
-                    KI_VEL, 
-                    KD_VEL,
-                    max_control=V_MAX_CONTROL,
-                    i_limit=I_LIMIT_VEL)
-
-        pid_vx.reset()
-        pid_vy.reset()
-
-        mono = time.monotonic
-        next_t = mono()
-
-        kin = self.get_sim_kinematics()
-        cx, cy = self._world_xy(kin)
-
-        qx, qy, qz, qw = kin["orientation"]
-        _, _, yaw = quat2euler((qw, qx, qy, qz), axes="sxyz")
-
-        # ========= TARGET =========
-        x0 = 0
-        y0 = 0
-
-        if not use_body_shift:
-            if use_odom_frame and self._odom0_xy is not None:
-                x0, y0 = self._odom0_xy
-                tgt_x, tgt_y = x0 + x, y0 + y
-            else:
-                tgt_x, tgt_y = x, y
-        else:
-            tgt_x = cx + math.cos(yaw) * x - math.sin(yaw) * y
-            tgt_y = cy + math.sin(yaw) * x + math.cos(yaw) * y
-
-        dx0 = tgt_x - cx
-        dy0 = tgt_y - cy
-        dist0 = math.hypot(dx0, dy0)
-        timeout = max(T_MIN, min((dist0 / 0.1) * 2.0, T_MAX))
-        deadline = mono() + timeout
-
-        x_prev, y_prev = cx, cy
-        v_fwd_target_prev = 0.0
-        v_left_target_prev = 0.0
-
-        # === НАЧАЛЬНЫЙ ИМПУЛЬС: вычисляем направление к цели ===
-        
-        push_start_time = mono()
-        # Нормализованный вектор направления в локальной СК дрона
-        initial_err_x = math.cos(yaw) * dx0 + math.sin(yaw) * dy0
-        initial_err_y = -math.sin(yaw) * dx0 + math.cos(yaw) * dy0
-        initial_dist = math.hypot(initial_err_x, initial_err_y)
-        
-        if initial_dist > 0.01:  # Избегаем деления на ноль
-            push_dir_x = initial_err_x / initial_dist  # Направление вперед/назад
-            push_dir_y = initial_err_y / initial_dist  # Направление влево/вправо
-        else:
-            push_dir_x = push_dir_y = 0.0
-
-        try:
-            while True:
-                kin = self.get_sim_kinematics()
-                x_w = sim_to_api_distance(kin["location"][0]) + x0
-                y_w = sim_to_api_distance(kin["location"][1]) + y0
-
-                qx, qy, qz, qw = kin["orientation"]
-                _, _, yaw = quat2euler((qw, qx, qy, qz), axes="sxyz")
-
-                # ========= POSITION ERROR =========
-                dx = tgt_x - x_w
-                dy = tgt_y - y_w
-
-                err_x =  math.cos(yaw) * dx + math.sin(yaw) * dy
-                err_y = -math.sin(yaw) * dx + math.cos(yaw) * dy
-
-                # ========= POSITION → VELOCITY =========
-                pid_px.update_control(err_x)
-                pid_py.update_control(err_y)
-
-                v_fwd_target = pid_px.get_control()
-                v_left_target = pid_py.get_control()
-                
-                # === ДОБАВЛЯЕМ НАЧАЛЬНЫЙ ИМПУЛЬС ===
-                if initial_push_active:
-                    elapsed = mono() - push_start_time
-                    if elapsed < PUSH_DURATION:
-                        # Экспоненциальное затухание импульса
-                        decay_factor = math.exp(-3.0 * elapsed / PUSH_DURATION)  # Быстрое затухание
-                        push_strength = INITIAL_PUSH * decay_factor
-                        
-                        # Добавляем импульс в направлении цели
-                        v_fwd_target += push_dir_x * push_strength
-                        v_left_target += push_dir_y * push_strength
-                    else:
-                        initial_push_active = False  # Отключаем импульс после завершения
-
-                # accel limiting
-                dv_fwd  = max(-A_MAX * PERIOD, min(v_fwd_target  - v_fwd_target_prev,  A_MAX * PERIOD))
-                dv_left = max(-A_MAX * PERIOD, min(v_left_target - v_left_target_prev, A_MAX * PERIOD))
-
-                v_fwd_target  = v_fwd_target_prev  + dv_fwd
-                v_left_target = v_left_target_prev + dv_left
-
-                v_fwd_target  = max(-V_MAX, min(v_fwd_target,  V_MAX))
-                v_left_target = max(-V_MAX, min(v_left_target, V_MAX))
-
-                v_fwd_target_prev  = v_fwd_target
-                v_left_target_prev = v_left_target
-
-                # ========= CURRENT VELOCITY =========
-                vx_w = (x_w - x_prev) / PERIOD
-                vy_w = (y_w - y_prev) / PERIOD
-
-                v_fwd_current  =  math.cos(yaw) * vx_w + math.sin(yaw) * vy_w
-                v_left_current = -math.sin(yaw) * vx_w + math.cos(yaw) * vy_w
-
-                x_prev, y_prev = x_w, y_w
-
-                # ========= VELOCITY LOOP =========
-                err_v_fwd  = v_fwd_target  - v_fwd_current
-                err_v_left = v_left_target - v_left_current
-
-                pid_vx.update_control(err_v_fwd)
-                pid_vy.update_control(err_v_left)
-
-                u_fwd  = pid_vx.get_control()
-                u_left = pid_vy.get_control()
-
-
-
-                pitch_pwm = vel_to_rc_signal(u_fwd)
-                roll_pwm  = vel_to_rc_signal(-u_left)
-
-                self._rpy_vel_data = (roll_pwm, pitch_pwm, 1500)
-
-                location_error = math.sqrt((dx**2) + (dy**2))
-                velocity_error = math.sqrt((vx_w**2) + (vy_w**2))
-                
-                # ========= EXIT =========
-                if (
-                    location_error < POS_THR and
-                    velocity_error < VEL_THR
-                ):
-                    #self._soft_stop_xy(duration=4, rate_hz=50, profile="tanh")
-                    self._rpy_vel_data = (1500, 1500, 1500)
-                    print(f"[STAT] X_error = {dx:.3f}, Y_error = {dy:.3f}")
-                    print(f"[STAT] Error {location_error:.3f} < THR {POS_THR}")
-                    return True
-
-                if mono() > deadline:
-                    #self._soft_stop_xy(duration=5, rate_hz=50, profile="tanh")
-                    self._rpy_vel_data = (1500, 1500, 1500)
-                    return False
-
-                next_t += PERIOD
-                sleep_time = max(0.0, next_t - mono())
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-
-        finally:
-            pass
-
-    def _flush_log_buffer(self, log_file, buffer):
-        """Записывает буфер логов в файл"""
-        for entry in buffer:
-            self._log_pid_data(log_file, *entry)
-        log_file.flush()  # Гарантируем запись на диск
-
     def getOdomOpticflow(self):
         kin = self.get_sim_kinematics()
         x, y = self._world_xy(kin)
@@ -462,135 +485,51 @@ class HighLevelSimClient:
         odom_x = x - last_x
         odom_y = y - last_y
         return [odom_x, odom_y, self._altitude]
-
-    def gotoXYdrone(self, x, y):
-        return self.go_to_xy("base_link", x, y)
-
-    def gotoXYodom(self, x, y):
-        return self.go_to_xy("odom", x, y)
-
     
     @staticmethod
     def _wrap_pi(a: float) -> float:
-        """Нормализация угла в интервал [-pi, pi)."""
+        """Нормализация угла в [-pi, pi)"""
         return (a + math.pi) % (2 * math.pi) - math.pi
-
+    
     def _get_yaw_cw(self) -> float:
-        """
-        Текущий курс в РАДИАНАХ с положительным направлением ПО ЧАСОВОЙ.
-        IMU/сим даёт yaw CCW -> инвертируем знак.
-        """
-        kin = self.get_sim_kinematics()  # ДОЛЖЕН быть кэш (см. твой sim_kinematics_callback)
-        qx, qy, qz, qw = kin["orientation"]  # (x,y,z,w)
+        """Текущий курс в радианах (по часовой стрелке)"""
+        kin = self.get_sim_kinematics()
+        if kin is None:
+            return 0.0
+        qx, qy, qz, qw = kin["orientation"]
         _, _, yaw_ccw = quat2euler((qw, qx, qy, qz), axes='sxyz')
-        return -yaw_ccw  # переводим в CW
-
-    def setYaw(self, yaw: float) -> bool:
-        """
-        БЛОКИРУЮЩИЙ поворот до абсолютного угла в ГЛОБАЛЬНОЙ СК.
-        Вход: yaw — радианы, ПО ЧАСОВОЙ (CW), нормализуется в [-pi, pi).
-        Возврат: True (достиг в допуске) / False (таймаут).
-        """
-        # ===== жёсткие настройки =====
-        PERIOD     = 1/20.0     # 20 Гц
-        TOL        = 0.025       # рад, допуск по углу
-        MAX_TIME   = 10.0       # сек, таймаут
-        MAX_RATE   = 1        # рад/с, ограничение выхода PID
-        KP, KI, KD = 3.5, 0.001, 0.4  # PID по курсу
-        I_LIMIT    = None       # можно поставить число (напр. 600) для ограничения интеграла
-        # =============================
-
-        pid = PID(KP, KI, KD, max_control=MAX_RATE, i_limit=I_LIMIT)
-        pid.reset()
-
-        mono = time.monotonic
-        next_t = mono()
-        deadline = mono() + MAX_TIME
-
-        # цель сразу нормализуем в CW
-        goal = self._wrap_pi(yaw)
-
-        try:
-            while True:
-                curr = self._get_yaw_cw()                    # текущее CW
-                err  = self._wrap_pi(goal - curr)            # кратчайшая дуга
-
-                # завершение
-                if abs(err) < TOL:
-                    r, p, _ = self._rpy_vel_data
-                    self._rpy_vel_data = (r, p, 1500)    # отпустить руддер
-                    
-                    time.sleep(1.0)         
-                    return True
-                if mono() > deadline:
-                    r, p, _ = self._rpy_vel_data
-                    self._rpy_vel_data = (r, p, 1500)
-                    
-                    time.sleep(1.0)
-                    return False
-
-                # PID -> угловая скорость (рад/с), внутри уже есть сатурация MAX_RATE
-                pid.update_control(err)
-                rate_cw = pid.get_control()
-
-                # рад/с -> PWM (если «вправо» у тебя даёт yaw<1500 — просто поставь минус)
-                yaw_pwm = vel_to_rc_signal(rate_cw)  # или vel_to_rc_signal(-rate_cw), если знак канала другой
-
-                # пишем только yaw
-                r, p, _ = self._rpy_vel_data
-                self._rpy_vel_data = (r, p, yaw_pwm)  # оставь именно (r, p, yaw_pwm)
-
-                next_t += PERIOD
-                time.sleep(max(0.0, next_t - mono()))
-        finally:
-            # гарантированно нейтраль по yaw
-            r, p, _ = self._rpy_vel_data
-            self._rpy_vel_data = (r, p, 1500)
-        
-        
-
-    def _wrap(self, a: float) -> float:  # на будущее (не обязателен)
-        return (a + math.pi) % (2*math.pi) - math.pi
-
+        return -yaw_ccw
+    
     def _get_height(self) -> float:
-        # Текущая высота из твоего кэша (calculate_height_rc её обновляет)
         return float(self._altitude)
-
+    
     def _clamp_h(self, h: float, lo: float, hi: float) -> float:
         return max(lo, min(h, hi))
-
+    
     def _sleep_until(self, t_deadline: float, period: float) -> bool:
-        # true -> живём; false -> вышел таймаут
         now = time.monotonic()
         if now >= t_deadline:
             return False
         time.sleep(max(0.0, period - (time.monotonic() - now)))
         return True
-
+    
     def takeoff(self) -> bool:
-        """
-        ВЗЛЁТ: мгновенно кидаем целевую высоту takeoff_h и ждём достижения.
-        Блокирующий. True/False = достиг/таймаут.
-        """
-        # ---- жёсткие настройки ----
-        PERIOD        = 0.05      # 20 Гц
-        MIN_H         = 0.00
-        TAKEOFF_H     = 0.5
-        MAX_H         = 5.00
-        REACH_COEF    = 0.97      # считаем «достигли», если >= 70% цели
-        TIMEOUT_COEF  = 10.0      # с/м
-        # ---------------------------
-
+        """Взлет дрона"""
+        PERIOD = 0.05
+        MIN_H = 0.00
+        TAKEOFF_H = 0.5
+        MAX_H = 5.00
+        REACH_COEF = 0.97
+        TIMEOUT_COEF = 10.0
+        
         h_now = self._get_height()
-        tgt   = self._clamp_h(TAKEOFF_H, MIN_H, MAX_H)
-
-        # Мгновенно ставим финальный сетпоинт
+        tgt = self._clamp_h(TAKEOFF_H, MIN_H, MAX_H)
+        
         self.set_target_height(tgt)
-
-        # Таймаут пропорционален требуемому подъёму (как в твоём ROS-коде)
+        
         climb = max(0.0, tgt - h_now)
         deadline = time.monotonic() + (TIMEOUT_COEF * climb if climb > 0.0 else TIMEOUT_COEF)
-
+        
         while True:
             h = self._get_height()
             if h >= REACH_COEF * tgt:
@@ -599,28 +538,22 @@ class HighLevelSimClient:
                 return False
             if not self._sleep_until(deadline, PERIOD):
                 return False
-
+    
     def boarding(self) -> bool:
-        """
-        ПОСАДКА: плавно снижаем целевой сетпоинт до MIN_H лесенкой.
-        Блокирующий. True/False = завершил/таймаут.
-        """
-        # ---- жёсткие настройки ----
-        PERIOD        = 0.05      # 20 Гц
-        MIN_H         = 0.00
-        MAX_H         = 5.00
-        STEP          = 0.005      # м за шаг сетпоинта
-        TIMEOUT_MIN   = 15.0      # базовый таймаут
-        TIMEOUT_COEF  = 10.0      # доп. таймаут пропорционален высоте
-        # ---------------------------
-
-        # Стартуем от текущего командного сетпоинта (если он меньше факта — ок)
+        """Посадка дрона"""
+        PERIOD = 0.05
+        MIN_H = 0.00
+        MAX_H = 5.00
+        STEP = 0.1
+        TIMEOUT_MIN = 15.0
+        TIMEOUT_COEF = 10.0
+        
         curr_cmd = float(getattr(self, "_target_height", 0.0))
         curr_cmd = self._clamp_h(curr_cmd, MIN_H, MAX_H)
-
+        
         total_drop = max(0.0, curr_cmd - MIN_H)
         deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * total_drop
-
+        
         while curr_cmd > MIN_H:
             curr_cmd = max(MIN_H, curr_cmd - STEP)
             self.set_target_height(curr_cmd)
@@ -628,34 +561,24 @@ class HighLevelSimClient:
                 return False
             if not self._sleep_until(deadline, PERIOD):
                 return False
-
-        # На земле — успех (ждать фактического нуля не обязательно: контур дотянет сам)
-        # Сбрасываем PID и целевую высоту для подготовки к следующему взлету
+        
         self._target_height = 0.0
         self.__alt_pid.reset()
         return True
-
+    
     def setHeight(self, target_height: float) -> bool:
-        """
-        Установить высоту.
-        - Если цель ВЫШЕ текущей фактической высоты → сразу ставим конечный сетпоинт и ждём достижения.
-        - Если цель НИЖЕ текущей фактической высоты → плавно опускаем сетпоинт лесенкой до цели.
-        Блокирующий. True/False = достиг/таймаут/пределы.
-        """
-        # ---- жёсткие настройки ----
-        PERIOD        = 0.05
-        MIN_H         = 0.00
-        MAX_H         = 5.00
-        STEP          = 0.005
-        REACH_COEF    = 0.97
-        TIMEOUT_MIN   = 15.0
-        TIMEOUT_COEF  = 10.0
-        # ---------------------------
-
+        """Установка высоты"""
+        PERIOD = 0.05
+        MIN_H = 0.00
+        MAX_H = 5.00
+        STEP = 0.005
+        REACH_COEF = 0.97
+        TIMEOUT_MIN = 15.0
+        TIMEOUT_COEF = 10.0
+        
         tgt = self._clamp_h(float(target_height), MIN_H, MAX_H)
-        h0  = self._get_height()
-
-        # ВВЕРХ: сразу кидаем финальный сетпоинт
+        h0 = self._get_height()
+        
         if tgt >= h0:
             self.set_target_height(tgt)
             deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * max(0.0, tgt - h0)
@@ -667,47 +590,37 @@ class HighLevelSimClient:
                     return False
                 if not self._sleep_until(deadline, PERIOD):
                     return False
-
-        # ВНИЗ: плавная лесенка от текущего командного
-        curr_cmd = float(getattr(self, "_target_height", h0))
-        curr_cmd = self._clamp_h(curr_cmd, MIN_H, MAX_H)
-        deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * max(0.0, curr_cmd - tgt)
-
-        while curr_cmd > tgt:
-            curr_cmd = max(tgt, curr_cmd - STEP)
-            self.set_target_height(curr_cmd)
-            if time.monotonic() >= deadline:
-                return False
-            if not self._sleep_until(deadline, PERIOD):
-                return False
-
+        else:
+            curr_cmd = float(getattr(self, "_target_height", h0))
+            curr_cmd = self._clamp_h(curr_cmd, MIN_H, MAX_H)
+            deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * max(0.0, curr_cmd - tgt)
+            
+            while curr_cmd > tgt:
+                curr_cmd = max(tgt, curr_cmd - STEP)
+                self.set_target_height(curr_cmd)
+                if time.monotonic() >= deadline:
+                    return False
+                if not self._sleep_until(deadline, PERIOD):
+                    return False
+        
         return True
-
-
+    
     def sim_kinematics_callback(self):
-        """
-        Callback для обновления данных кинематики и изображений.
-        Включает проверку ошибок для обнаружения смерти симулятора.
-        """
-        # Не обновляем, если симулятор уже мертв
+        """Обновление данных кинематики"""
         if not self._simulator_alive:
             return
         
-        should_check_death = True
+        should_check_death = False
         
         try:
-            # Используем блокировку при обращении к клиенту
             with self._client_lock:
-                # Проверяем доступность клиента
                 if not hasattr(self, '_client') or self._client is None:
                     self._consecutive_errors += 1
                     should_check_death = True
-                    
                 else:
-                    # Получаем данные с обработкой ошибок
                     try:
                         self._sim_kinematics = self._client.get_kinametics_data()
-                        self._sim_img = self._client.get_camera_capture(camera_id=0)
+                        self._sim_img = self._client.get_camera_capture(camera_id=1)
                         self._sim_ultrasonic = self._client.get_range_data(
                             rangefinder_id=0,
                             range_min=0.15,
@@ -716,127 +629,77 @@ class HighLevelSimClient:
                             range_error=0.0003
                         ) * 100
                         
-                        # Успешное получение данных - сбрасываем счетчик ошибок
                         self._consecutive_errors = 0
                         self._simulator_alive = True
                         
                     except Exception as e:
-                        # Ошибка при получении данных
                         self._consecutive_errors += 1
-                        logger = logging.getLogger(__name__)
                         logger.warning(f"Error getting simulator data: {e}")
                         should_check_death = True
                         
         except Exception as e:
-            # Критическая ошибка
             self._consecutive_errors += 1
-            logger = logging.getLogger(__name__)
             logger.error(f"Critical error in sim_kinematics_callback: {e}")
             should_check_death = True
         
-        # Проверяем смерть симулятора ПОСЛЕ выхода из блокировки
         if should_check_death:
             self._check_simulator_death()
     
-    def _check_simulator_death(self):
-        """Проверка на смерть симулятора и вызов колбэка"""
-        if self._consecutive_errors >= self._error_threshold:
-            self._simulator_alive = False
-            logger = logging.getLogger(__name__)
-            logger.error(f"Simulator death detected! Consecutive errors: {self._consecutive_errors}")
-            
-            # Сначала останавливаем все таймеры, чтобы предотвратить дальнейшие ошибки
-            logger.error("Stopping all timers...")
-            self._stop_all_timers()
-
-            if self._on_death_callback is not None:
-                logger.error("Calling simulator death callback...")
-                try:
-                    self._on_death_callback()
-                except Exception as e:
-                    logger.error(f"Error in death callback: {e}")
-    
-    def _stop_all_timers(self):
-        """Останавливает все таймеры для предотвращения дальнейших ошибок"""
-        try:
-            if hasattr(self, '_height_timer') and self._height_timer is not None:
-                self._height_timer.stop()
-            if hasattr(self, '_rc_timer') and self._rc_timer is not None:
-                self._rc_timer.stop()
-            if hasattr(self, '_sim_kinematics_timer') and self._sim_kinematics_timer is not None:
-                self._sim_kinematics_timer.stop()
-            if hasattr(self, '_image_processing_timer') and self._image_processing_timer is not None:
-                self._image_processing_timer.stop()
-        except Exception as e:
-            # Игнорируем ошибки при остановке таймеров (могут быть, если вызываем из текущего таймера)
-            pass
-
-
     def get_sim_kinematics(self):
         return self._sim_kinematics
     
-
     def transmit_rc_to_sim(self):
-        """Отправка RC команд в симулятор"""
-        # Не отправляем, если симулятор мертв
+        """Отправка RC команд"""
         if not self._simulator_alive:
             return
-            
-        roll, pitch, yaw = self._rpy_vel_data
-        raw_rc = [roll, pitch, self._throttle_data, yaw, self._arm_data, self._fliyng_mode, self._nav_mode]
-        raw_rc = self.clamp_rc_list(raw_rc)
+        
         try:
+            roll, pitch, yaw = self._rpy_vel_data
+            raw_rc = [roll, pitch, self._throttle_data, yaw, self._arm_data, self._fliyng_mode, self._nav_mode]
+            raw_rc = self.clamp_rc_list(raw_rc)
             msg = self._control.send_RAW_RC(raw_rc)
             data_handler = self._control.receive_msg()
         except Exception:
-            # Игнорируем ошибки при отправке, если симулятор мертв
             pass
-
+    
     def setVelXY(self, x, y):
+        """Устаревший метод, использовать set_velocity_xy"""
+        self.set_velocity_xy(x, y)
+    
+    def setVelXYYaw(self, x, y, yaw):
         rpy = self._rpy_vel_data
         rc_x = vel_to_rc_signal(x)
         rc_y = vel_to_rc_signal(y)
         self._rpy_vel_data = (rc_y, rc_x, rpy[2])
     
-    def setVelXYYaw(self, x, y, yaw):
-        rc_x = vel_to_rc_signal(x)
-        rc_y = vel_to_rc_signal(y)
-        rc_yaw = vel_to_rc_signal(yaw)
-        self._rpy_vel_data = (rc_y, rc_x, rc_yaw)
-
     def armDrone(self):
         self._armed_flag = True
         self._arm_data = 2000
-        # Сбрасываем throttle на нейтральное значение при арминге
         self._throttle_data = 1000
-        # Сбрасываем PID высоты для чистого старта
         self.__alt_pid.reset()
-
+    
     def disarmDrone(self):
         self._armed_flag = False
         self._arm_data = 1000
-        # При дизарме сбрасываем throttle
         self._throttle_data = 1000
-
+    
     def initDrone(self):
         self._rpy_vel_data = (1500, 1500, 1500)
         self._throttle_data = 1000
         self._arm_data = 1000
         self._fliyng_mode = 1000
         self._nav_mode = 1000
-
+    
     def posholdOn(self):
         self._poshold_flag = True
         self._nav_mode = 1500
-
+    
     def posholdOff(self):
         self._poshold_flag = False
         self._nav_mode = 1000
-        # При выключении poshold сбрасываем throttle на нейтраль
         self._throttle_data = 1000
-        # Сбрасываем PID высоты
         self.__alt_pid.reset()
-
+    
     def clamp_rc(self, data):
         return max(min(data, 2000), 1000)
     
@@ -849,68 +712,121 @@ class HighLevelSimClient:
     def set_target_height(self, height):
         self._target_height = height
         self.__alt_pid.reset()
-
-    #new
+    
     def getImage(self):
-        with self._client_lock: 
+        with self._client_lock:
             return self._sim_img
     
-    def getArucos(self): 
+    def getArucos(self):
         return self._aruco_data
     
-    def getCameraPoseAruco(self): 
+    def getCameraPoseAruco(self):
         return self._camera_pose_aruco_data
     
-    def getBlobs(self): 
+    def getBlobs(self):
         return self._blob_data
     
-    def getBlobsImage(self): 
+    def getBlobsImage(self):
         return self._blob_img
     
-    def getArucosImage(self): 
+    def getArucosImage(self):
         return self._aruco_img
     
-    def image_processing_callback(self): 
-        # Обработка изображения не требует доступа к клиенту, 
-        # используем уже полученное изображение из кэша
-
-        sim_image = self._sim_img.copy() if self._sim_img is not None else None
-        camera_img = resolution_changes(sim_image, (320, 240))
-
+    def image_processing_callback(self):
+        sim_img = self._sim_img.copy() if self._sim_img is not None else None
+        camera_img = resolution_changes(sim_img, (320, 240))
+        
         img_aruco = camera_img.copy() if self._sim_img is not None else None
         img_blob = camera_img.copy() if self._sim_img is not None else None
         
         if img_aruco is not None:
             self._aruco_data, self._camera_pose_aruco_data, aruco_img = process_aruco(img_aruco)
-
             if aruco_img is None:
-                self._aruco_img = sim_image
+                self._aruco_img = sim_img
             else:
                 self._aruco_img = resolution_changes(aruco_img, (640, 480))
-
-
+        
         if img_blob is not None:
             self._blob_data, blob_img = process_blob(img_blob)
             if blob_img is None:
-                self._blob_img = sim_image
+                self._blob_img = sim_img
             else:
                 self._blob_img = resolution_changes(blob_img, (640, 480))
-
-    def setDiod(self,led_id, r, g, b):
-        # Используем блокировку при обращении к клиенту
+    
+    def setDiod(self, r, g, b):
         with self._client_lock:
-            self._client.set_Diod(int(led_id), float(r), float(g), float(b))
-        
+            self._client.set_Diod(0, float(r), float(g), float(b))
+            self._client.set_Diod(1, float(r), float(g), float(b))
+            self._client.set_Diod(2, float(r), float(g), float(b))
+            self._client.set_Diod(3, float(r), float(g), float(b))
+    
     def setShoot(self, time):
         with self._client_lock:
             return self._client.call_event_action()
-
+    
     def set_simulator_death_callback(self, callback):
-        """Установить колбэк, вызываемый при обнаружении смерти симулятора"""
         self._on_death_callback = callback
-
+    
     def is_simulator_alive(self):
-        """Проверить, жив ли симулятор"""
         return self._simulator_alive
-
-
+    
+    def _check_simulator_death(self):
+        """Проверка на смерть симулятора"""
+        if self._consecutive_errors >= self._error_threshold:
+            self._simulator_alive = False
+            logger.error(f"Simulator death detected! Consecutive errors: {self._consecutive_errors}")
+            self._stop_all_timers()
+            
+            if self._on_death_callback is not None:
+                logger.error("Calling simulator death callback...")
+                try:
+                    self._on_death_callback()
+                except Exception as e:
+                    logger.error(f"Error in death callback: {e}")
+    
+    def _stop_all_timers(self):
+        """Остановка всех таймеров"""
+        import threading
+        current_thread = threading.current_thread()
+        
+        try:
+            if hasattr(self, '_height_timer') and self._height_timer is not None:
+                if self._height_timer._thread != current_thread:
+                    self._height_timer.stop()
+        except Exception:
+            pass
+            
+        try:
+            if hasattr(self, '_rc_timer') and self._rc_timer is not None:
+                if self._rc_timer._thread != current_thread:
+                    self._rc_timer.stop()
+        except Exception:
+            pass
+            
+        try:
+            if hasattr(self, '_sim_kinematics_timer') and self._sim_kinematics_timer is not None:
+                if self._sim_kinematics_timer._thread != current_thread:
+                    self._sim_kinematics_timer.stop()
+        except Exception:
+            pass
+            
+        try:
+            if hasattr(self, '_image_processing_timer') and self._image_processing_timer is not None:
+                if self._image_processing_timer._thread != current_thread:
+                    self._image_processing_timer.stop()
+        except Exception:
+            pass
+            
+        try:
+            if hasattr(self, '_yaw_timer') and self._yaw_timer is not None:
+                if self._yaw_timer._thread != current_thread:
+                    self._yaw_timer.stop()
+        except Exception:
+            pass
+            
+        try:
+            if hasattr(self, '_velocity_timer') and self._velocity_timer is not None:
+                if self._velocity_timer._thread != current_thread:
+                    self._velocity_timer.stop()
+        except Exception:
+            pass
