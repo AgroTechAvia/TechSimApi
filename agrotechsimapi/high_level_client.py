@@ -45,7 +45,7 @@ if __name__ == "__main__":
 class HighLevelSimClient:
     """
     Клиент высокого уровня для управления дроном в симуляторе TechSim.
-    
+
     Реализует:
     - Каскадное PID-управление (позиция → скорость → PWM)
     - Два режима управления: position и velocity
@@ -53,23 +53,32 @@ class HighLevelSimClient:
     - Обнаружение смерти симулятора
     - Взлет, посадка, перемещение в точку
     """
-    
+
     # Типы режимов управления
     ControlMode = Literal["position", "velocity"]
-    
+
+    # ===== НАСТРОЙКИ МАКСИМАЛЬНОЙ СКОРОСТИ И УСКОРЕНИЯ =====
+    _max_velocity = 0.2  # Максимальная скорость (м/с)
+    _max_acceleration = 0.33 # Максимальное ускорение (м/с²)
+    # =======================================================
+
     def __init__(self):
         # ===== ПИД-РЕГУЛЯТОРЫ (горизонтальное движение) =====
-        # Позиция → Скорость
-        self._pid_pos_x = PID(kp=1.055, ki=0, kd=7.15, max_control=1.35, i_limit=0.0001)
-        self._pid_pos_y = PID(kp=1.055, ki=0, kd=7.15, max_control=1.35, i_limit=0.0001)
-        
-        # Скорость → PWM
-        self._pid_vel_x = PID(kp=7.5, ki=0.00001, kd=6.0, max_control=1.55, i_limit=0.001)
-        self._pid_vel_y = PID(kp=7.5, ki=0.00001, kd=6.0, max_control=1.55, i_limit=0.001)
-        
-        # Yaw PID
+        # Позиция → Скорость (с экспоненциальной зависимостью для плавности)
+        self._pid_pos_x = PID(kp=1.5, ki=0.0, kd=7.15, max_control=self._max_velocity, 
+                              i_limit=0.1**3, is_exp=True, exp_factor=1.1)
+        self._pid_pos_y = PID(kp=1.5, ki=0.0, kd=7.15, max_control=self._max_velocity, 
+                              i_limit=0.1**3, is_exp=True, exp_factor=1.1)
+
+        # Скорость → PWM (с экспоненциальной зависимостью для плавности)
+        self._pid_vel_x = PID(kp=2, ki=0.0, kd=6.0, max_control=0.66, 
+                              i_limit=0.1**3, is_exp=True, exp_factor=1.2)
+        self._pid_vel_y = PID(kp=2, ki=0.0, kd=6.0, max_control=0.66, 
+                              i_limit=0.1**3, is_exp=True, exp_factor=1.2)
+
+        # Yaw PID (линейный, т.к. точность важна)
         self._pid_yaw = PID(kp=3.5, ki=0.001, kd=0.4, max_control=1.0, i_limit=None)
-        
+
         # ===== ПИД-регулятор высоты =====
         #self.__alt_pid = PID(3, 0.015, 5)
         self.__alt_pid = PID(0.1, 0.0, 3)
@@ -79,35 +88,38 @@ class HighLevelSimClient:
         self._target_velocity = (0.0, 0.0)  # Целевая скорость (vx, vy)
         self._target_yaw = 0.0  # Целевой угол поворота
         
+        # Флаг блокировки velocity_callback (для setYaw)
+        self._velocity_callback_locked = False
+
         self._odom = (0.0, 0.0)
         self._altitude = 0.0
         self._target_height = 0.0
-        
+
         self._armed_flag = False
         self._poshold_flag = False
-        
+
         self._sim_img = None
         self._blob_img = None
         self._aruco_img = None
         self._aruco_data = []
         self._camera_pose_aruco_data = []
         self._blob_data = []
-        
+
         self._odom0_xy = (0.0, 0.0)  # (x0, y0) в мировой СК на момент «сброса одометрии»
-        
+
         self._sim_kinematics = None
         self._sim_ultrasonic = None
-        
+
         # ===== Блокировки =====
         self._client_lock = threading.Lock()
-        
+
         # ===== МЕХАНИЗМ ОТСЛЕЖИВАНИЯ СМЕРТИ СИМУЛЯТОРА =====
         self._consecutive_errors = 0
         self._error_threshold = 2
         self._simulator_alive = True
         self._on_death_callback = None
         # =================================================
-        
+
         print("process started")
     
     def connect(self, ip, port):
@@ -204,81 +216,168 @@ class HighLevelSimClient:
     def velocity_callback(self):
         """
         Фоновый коллбэк для каскадного управления скоростью (50 Гц).
-        
+
         Контур 1: Позиция → Скорость (работает только в режиме position)
         Контур 2: Скорость → PWM (работает всегда)
+
+        БЛОКИРОВКА: Если _velocity_callback_locked=True, то PWM не обновляются
+        (используется при setYaw для предотвращения осцилляции)
+        
+        ВАЖНО: Все вычисления ведутся в СК ДРОНА (body frame), а не в мировой СК!
         """
         if not self._simulator_alive:
             return
-        
+
+        # Проверяем блокировку - если установлена, не обновляем PWM
+        if self._velocity_callback_locked:
+            return
+
         try:
             kin = self.get_sim_kinematics()
             if kin is None:
                 return
-            
-            # Получаем текущую позицию и скорость
+
+            # Получаем текущую позицию в мировой СК
             x_w = sim_to_api_distance(kin["location"][0])
             y_w = sim_to_api_distance(kin["location"][1])
-            
-            # Вычисляем текущую скорость (простая разность позиций)
+
+            # Получаем текущий yaw дрона (CW, радианы)
+            yaw = self._get_yaw_cw()
+            cos_yaw = math.cos(yaw)
+            sin_yaw = math.sin(yaw)
+
+            # Вычисляем текущую скорость в мировой СК
             if hasattr(self, '_prev_x') and hasattr(self, '_prev_y'):
-                vx = (x_w - self._prev_x) * 50  # 50 Гц
-                vy = (y_w - self._prev_y) * 50
+                vx_world = (x_w - self._prev_x) * 50  # 50 Гц
+                vy_world = (y_w - self._prev_y) * 50
             else:
-                vx = vy = 0.0
-            
+                vx_world = vy_world = 0.0
+
             self._prev_x = x_w
             self._prev_y = y_w
-            
+
             # ===== КОНТУР 1: Позиция → Скорость =====
             if self._control_mode == "position":
-                # Вычисляем ошибку позиции
+                # Вычисляем ошибку позиции в МИРОВОЙ СК
                 tx, ty = self._target_position
-                pos_error_x = tx - x_w
-                pos_error_y = ty - y_w
-                
-                # PID позиции выдает целевую скорость
-                self._pid_pos_x.update_control(pos_error_x)
-                self._pid_pos_y.update_control(pos_error_y)
-                
-                self._target_velocity = (
-                    self._pid_pos_x.get_control(),
-                    self._pid_pos_y.get_control()
-                )
-            
+                pos_error_x = tx - x_w  # Ошибка по X мира
+                pos_error_y = ty - y_w  # Ошибка по Y мира
+
+                # === ПРЕОБРАЗОВАНИЕ из мировой СК в СК ДРОНА ===
+                # Матрица поворота: мир → дрон (обратная к дрон → мир)
+                # X_дрона = X_мира * cos(yaw) - Y_мира * sin(yaw)
+                # Y_дрона = X_мира * sin(yaw) + Y_мира * cos(yaw)
+                pos_error_body_x = pos_error_x * cos_yaw - pos_error_y * sin_yaw
+                pos_error_body_y = pos_error_x * sin_yaw + pos_error_y * cos_yaw
+
+                # PID позиции выдает целевую скорость в СК ДРОНА
+                self._pid_pos_x.update_control(pos_error_body_x)
+                self._pid_pos_y.update_control(pos_error_body_y)
+
+                # Ограничиваем максимальную скорость
+                tvx_body = self._pid_pos_x.get_control()
+                tvy_body = self._pid_pos_y.get_control()
+
+                # Нормализуем вектор скорости если он превышает максимум
+                speed = math.hypot(tvx_body, tvy_body)
+                if speed > self._max_velocity:
+                    tvx_body = (tvx_body / speed) * self._max_velocity
+                    tvy_body = (tvy_body / speed) * self._max_velocity
+
+                self._target_velocity = (tvx_body, tvy_body)
+
             # ===== КОНТУР 2: Скорость → PWM =====
             # Работает ВСЕГДА (и в position, и в velocity)
-            tvx, tvy = self._target_velocity
-            
-            # Ошибка скорости
-            vel_error_x = tvx - vx
-            vel_error_y = tvy - vy
-            
+            tvx_body, tvy_body = self._target_velocity
+
+            # Ограничение ускорения
+            if hasattr(self, '_prev_target_vx') and hasattr(self, '_prev_target_vy'):
+                dvx = tvx_body - self._prev_target_vx
+                dvy = tvy_body - self._prev_target_vy
+                dt = 0.02  # 50 Гц
+                accel = math.hypot(dvx / dt, dvy / dt)
+
+                if accel > self._max_acceleration:
+                    scale = self._max_acceleration / accel
+                    tvx_body = self._prev_target_vx + dvx * scale
+                    tvy_body = self._prev_target_vy + dvy * scale
+
+            self._prev_target_vx = tvx_body
+            self._prev_target_vy = tvy_body
+
+            # === ПРЕОБРАЗОВАНИЕ текущей скорости из мировой СК в СК ДРОНА ===
+            vx_body = vx_world * cos_yaw - vy_world * sin_yaw
+            vy_body = vx_world * sin_yaw + vy_world * cos_yaw
+
+            # Ошибка скорости в СК ДРОНА
+            vel_error_x = tvx_body - vx_body
+            vel_error_y = tvy_body - vy_body
+
             # PID скорости выдает PWM
             self._pid_vel_x.update_control(vel_error_x)
             self._pid_vel_y.update_control(vel_error_y)
-            
+
             pitch_pwm = vel_to_rc_signal(self._pid_vel_x.get_control())
             roll_pwm = vel_to_rc_signal(-self._pid_vel_y.get_control())
-            
+
             # Обновляем roll/pitch, не трогая yaw
             _, _, y = self._rpy_vel_data
             self._rpy_vel_data = (roll_pwm, pitch_pwm, y)
-            
+
         except Exception as e:
             logger.warning(f"Error in velocity_callback: {e}")
     
     def set_velocity_xy(self, vx: float, vy: float):
         """
         Установить целевую скорость движения.
-        
+
         Args:
             vx: Скорость по оси X (м/с)
             vy: Скорость по оси Y (м/с)
         """
         self._control_mode = "velocity"
+        
+        # Ограничиваем скорость максимумом
+        speed = math.hypot(vx, vy)
+        if speed > self._max_velocity:
+            vx = (vx / speed) * self._max_velocity
+            vy = (vy / speed) * self._max_velocity
+        
         self._target_velocity = (vx, vy)
         #self.posholdOff()  # Выключаем PosHold
+    
+    def set_max_velocity(self, max_vel: float):
+        """
+        Установить максимальную скорость.
+        
+        Args:
+            max_vel: Максимальная скорость (м/с)
+        """
+        self._max_velocity = max(0.1, min(max_vel, 5.0))  # Ограничение 0.1-5.0 м/с
+        
+        # Обновляем max_control в PID позиции
+        self._pid_pos_x._max_control = self._max_velocity
+        self._pid_pos_y._max_control = self._max_velocity
+        
+        logger.info(f"Max velocity set to {self._max_velocity} m/s")
+    
+    def set_max_acceleration(self, max_accel: float):
+        """
+        Установить максимальное ускорение.
+        
+        Args:
+            max_accel: Максимальное ускорение (м/с²)
+        """
+        self._max_acceleration = max(0.5, min(max_accel, 10.0))  # Ограничение 0.5-10.0 м/с²
+        logger.info(f"Max acceleration set to {self._max_acceleration} m/s²")
+    
+    def get_max_velocity(self) -> float:
+        """Получить текущую максимальную скорость"""
+        return self._max_velocity
+    
+    def get_max_acceleration(self) -> float:
+        """Получить текущее максимальное ускорение"""
+        return self._max_acceleration
     
     def go_to_xy(self, frame: str, x: float, y: float, max_speed: float = 0.5) -> bool:
         """
@@ -349,7 +448,7 @@ class HighLevelSimClient:
             
             if dist < 0.1:  # 5 см допуск
                 logger.info(f"Reached target: {x}, {y}")
-                self.posholdOn()  # Включаем PosHold после достижения
+                #self.posholdOn()  # Включаем PosHold после достижения
                 return True
             
             # Обновляем текущую позицию
@@ -376,40 +475,73 @@ class HighLevelSimClient:
         """
         БЛОКИРУЮЩИЙ поворот до абсолютного угла.
         
+        Во время выполнения setYaw velocity_callback блокируется, чтобы
+        PID-регуляторы не сходили с ума и дрон не осциллировал.
+
         Args:
             yaw: Целевой угол (радианы, по часовой стрелке)
-            
+
         Returns:
             True если достиг угла, False если таймаут
         """
-        # Сброс PID
+        # Сброс PID yaw
         self._pid_yaw.reset()
-        
+
         # Нормализуем цель
         goal = self._wrap_pi(yaw)
         
+        # ===== БЛОКИРОВКА velocity_callback =====
+        #self._velocity_callback_locked = True
+        
+        # Центрируем roll/pitch чтобы дрон не летел
+        r, p, _ = self._rpy_vel_data
+        self._rpy_vel_data = (1500, 1500, r)  # Сохраняем текущий yaw PWM
+
         timeout = 10.0
         start_time = time.monotonic()
         tol = 0.025  # рад
         self._target_yaw = goal
+        
         while time.monotonic() - start_time < timeout:
             if not self._simulator_alive:
+                # ===== РАЗБЛОКИРОВКА при смерти симулятора =====
+                #self._velocity_callback_locked = False
                 return False
-            
+
             current = self._get_yaw_cw()
             error = self._wrap_pi(goal - current)
-            
+
             if abs(error) < tol:
                 # Достигли - центрируем yaw
                 r, p, _ = self._rpy_vel_data
                 self._rpy_vel_data = (r, p, 1500)
+                
+                # ===== РАЗБЛОКИРОВКА после успешного поворота =====
+                #self._velocity_callback_locked = False
+                
+                # Сброс PID позиции и скорости для предотвращения скачка
+                #self._pid_pos_x.reset()
+                #self._pid_pos_y.reset()
+                #self._pid_vel_x.reset()
+                #self._pid_vel_y.reset()
+                
                 return True
-            
+
             time.sleep(0.05)
-        
+
         # Таймаут
         r, p, _ = self._rpy_vel_data
         self._rpy_vel_data = (r, p, 1500)
+        
+        # ===== РАЗБЛОКИРОВКА при таймауте =====
+        #self._velocity_callback_locked = False
+        
+        # Сброс PID позиции и скорости
+        #self._pid_pos_x.reset()
+        #self._pid_pos_y.reset()
+        #self._pid_vel_x.reset()
+        #self._pid_vel_y.reset()
+        
         return False
     
     # =========================================================

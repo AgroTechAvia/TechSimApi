@@ -1,7 +1,18 @@
 import numpy as np
 
 class PID:
-    def __init__(self, kp, ki, kd, max_control=float('inf'), i_limit=None):
+    """
+    PID-регулятор с опциональной экспоненциальной зависимостью.
+    
+    Args:
+        kp, ki, kd: Коэффициенты пропорциональной, интегральной и дифференциальной составляющих
+        max_control: Максимальное значение выхода
+        i_limit: Лимит интеграла (None = без лимита)
+        is_exp: Если True, используется экспоненциальная зависимость (нелинейная)
+        exp_factor: Показатель степени для экспоненциальной зависимости (по умолчанию 2.0)
+    """
+    def __init__(self, kp, ki, kd, max_control=float('inf'), i_limit=None, 
+                 is_exp=False, exp_factor=2.0):
         self.kp = kp
         self.ki = ki
         self.kd = kd
@@ -9,13 +20,33 @@ class PID:
 
         # лимит интегратора (в «единицах ошибки * тик»); None = без лимита
         self.i_limit = i_limit
+        
+        # Параметры для экспоненциальной зависимости
+        self.is_exp = is_exp
+        self.exp_factor = exp_factor
 
         self.current_error = 0.0
         self.previous_error = 0.0
         self.integral = 0.0
         self.derivative = 0.0
         self.control = 0.0
+
+
+    def _apply_nonlinearity(self, value):
+        """
+        Применяет нелинейное преобразование к значению.
         
+        При is_exp=True использует экспоненциальную зависимость:
+        sign(value) * |value|^exp_factor
+        
+        Это дает:
+        - Меньшую реакцию на малые ошибки (плавнее старт)
+        - Большую реакцию на большие ошибки (быстрее коррекция)
+        """
+        if self.is_exp:
+            return np.sign(value) * (abs(value) ** self.exp_factor)
+        return value
+
 
     def update_control(self, current_error, reset_prev=False):
         if reset_prev:
@@ -25,8 +56,12 @@ class PID:
         self.previous_error = self.current_error
         self.current_error = current_error
 
+        # Применяем нелинейность к ошибке
+        error_nl = self._apply_nonlinearity(self.current_error)
+        prev_error_nl = self._apply_nonlinearity(self.previous_error)
+
         # накапливаем интеграл и жёстко ограничиваем его по i_limit
-        self.integral += self.current_error
+        self.integral += error_nl
         if self.i_limit is not None:
             if self.integral > self.i_limit:
                 self.integral = self.i_limit
@@ -34,11 +69,11 @@ class PID:
                 self.integral = -self.i_limit
 
         # дифференциал по тикам
-        self.derivative = self.current_error - self.previous_error
+        self.derivative = error_nl - prev_error_nl
 
         # PID-выход
         u = (
-            self.kp * self.current_error +
+            self.kp * error_nl +
             self.ki * self.integral +
             self.kd * self.derivative
         )
