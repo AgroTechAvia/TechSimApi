@@ -12,7 +12,7 @@ class PID:
         exp_factor: Показатель степени для экспоненциальной зависимости (по умолчанию 2.0)
     """
     def __init__(self, kp, ki, kd, max_control=float('inf'), i_limit=None, 
-                 is_exp=False, exp_factor=2.0):
+                 is_exp=False, exp_factor=1.0, processing_func = lambda x:x*1):
         self.kp = kp
         self.ki = ki
         self.kd = kd
@@ -24,6 +24,7 @@ class PID:
         # Параметры для экспоненциальной зависимости
         self.is_exp = is_exp
         self.exp_factor = exp_factor
+        self._processing_func = processing_func
 
         self.current_error = 0.0
         self.previous_error = 0.0
@@ -44,7 +45,7 @@ class PID:
         - Большую реакцию на большие ошибки (быстрее коррекция)
         """
         if self.is_exp:
-            return np.sign(value) * (abs(value) ** self.exp_factor)
+            return np.sign(value) * (self.exp_factor ** abs(value)) #* np.exp(abs(value * self.exp_factor))  #(abs(value) ** self.exp_factor)
         return value
 
 
@@ -57,9 +58,10 @@ class PID:
         self.current_error = current_error
 
         # Применяем нелинейность к ошибке
-        error_nl = self._apply_nonlinearity(self.current_error)
-        prev_error_nl = self._apply_nonlinearity(self.previous_error)
-
+        #error_nl = self._apply_nonlinearity(self.current_error)
+        #prev_error_nl = self._apply_nonlinearity(self.previous_error)
+        error_nl = self._processing_func(self.current_error)
+        prev_error_nl = self._processing_func(self.previous_error)
         # накапливаем интеграл и жёстко ограничиваем его по i_limit
         self.integral += error_nl
         if self.i_limit is not None:
