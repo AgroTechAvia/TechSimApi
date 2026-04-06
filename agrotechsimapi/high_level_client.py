@@ -61,7 +61,7 @@ class HighLevelSimClient:
 
     # ===== НАСТРОЙКИ МАКСИМАЛЬНОЙ СКОРОСТИ И УСКОРЕНИЯ =====
     _max_velocity = 0.25  # Максимальная скорость (м/с)
-    _max_acceleration = 0.5 # Максимальное ускорение (м/с²)
+    _max_acceleration = 0.75 # Максимальное ускорение (м/с²)
     # =======================================================
 
     _z_bias = 0
@@ -71,16 +71,16 @@ class HighLevelSimClient:
         # Позиция → Скорость (с экспоненциальной зависимостью для плавности)
 
         pos_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 3)))) - 1) * x
-        self._pid_pos_x = PID(kp=0.25, ki=0.0, kd=0.2, max_control=self._max_velocity,
-                              i_limit=0.0, processing_func = pos_pid_processing)
-        self._pid_pos_y = PID(kp=0.25, ki=0.0, kd=0.2, max_control=self._max_velocity,
-                              i_limit=0.0, processing_func = pos_pid_processing)
+        self._pid_pos_x = PID(kp=1.0, ki=0.0, kd=0.2, max_control=self._max_velocity,
+                              i_limit=0.0)#, processing_func = pos_pid_processing)
+        self._pid_pos_y = PID(kp=1.0, ki=0.0, kd=0.2, max_control=self._max_velocity,
+                              i_limit=0.0)#, processing_func = pos_pid_processing)
 
         # Скорость → PWM (с экспоненциальной зависимостью для плавности)
-        vel_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 5)))) - 1) * 1.3
-        self._pid_vel_x = PID(kp=3.0, ki=0.1, kd=1.0,
+        vel_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 4)))) - 1) * 1.15
+        self._pid_vel_x = PID(kp=6.0, ki=0.1, kd=0.75,
                               i_limit=0.5, processing_func = vel_pid_processing)
-        self._pid_vel_y = PID(kp=3.0, ki=0.1, kd=1.0,
+        self._pid_vel_y = PID(kp=6.0, ki=0.1, kd=0.75,
                               i_limit=0.5, processing_func = vel_pid_processing)
 
         # Yaw PID (линейный, т.к. точность важна)
@@ -98,13 +98,13 @@ class HighLevelSimClient:
         # Базовый throttle для висения (подобран экспериментально для TechSim)
         self._base_throttle_hover = 1500  # 1500 для висения с PosHold
         self._max_throttle = 1675  # Максимум для взлета/маневров
-        self._min_throttle = 1490  # Минимум для безопасности
+        self._min_throttle = 1450  # Минимум для безопасности
 
         # ===== КОЭФФИЦИЕНТЫ НАПРАВЛЕНИЯ (для подстройки под симулятор) =====
         # +1: PWM растет при движении вперед/вправо/по часовой
         # -1: PWM падает при движении вперед/вправо/по часовой
         # Подберите экспериментально для вашего симулятора
-        self._roll_direction = 1.0    # Направление roll: +1 или -1
+        self._roll_direction = -1.0    # Направление roll: +1 или -1
         self._pitch_direction = 1.0   # Направление pitch: +1 или -1
         self._yaw_direction = 1.0     # Направление yaw: +1 или -1
         # ====================================================================
@@ -312,16 +312,17 @@ class HighLevelSimClient:
                 self._pid_pos_y.update_control(pos_error_y)
 
                 # Ограничиваем максимальную скорость
-                tvx_world = self._pid_pos_x.get_control()
-                tvy_world = self._pid_pos_y.get_control()
+                tvx_world = min(self._pid_pos_x.get_control(), self._max_velocity)
+                tvy_world = min(self._pid_pos_y.get_control(), self._max_velocity)
 
                 # Нормализуем вектор скорости если он превышает максимум
                 speed = math.hypot(tvx_world, tvy_world)
-                if speed > self._max_velocity:
+                '''if speed > self._max_velocity:
                     tvx_world = (tvx_world / speed) * self._max_velocity
-                    tvy_world = (tvy_world / speed) * self._max_velocity
+                    tvy_world = (tvy_world / speed) * self._max_velocity'''
 
                 self._target_velocity = (tvx_world, tvy_world)
+                print(f"tvx_world {tvx_world:.2} tvt_world {tvy_world:.2}")
 
         except Exception as e:
             logger.warning(f"Error in position_callback: {e}")
