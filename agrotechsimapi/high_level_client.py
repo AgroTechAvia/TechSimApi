@@ -70,18 +70,22 @@ class HighLevelSimClient:
         # ===== ПИД-РЕГУЛЯТОРЫ (горизонтальное движение) =====
         # Позиция → Скорость (с экспоненциальной зависимостью для плавности)
 
-        pos_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 3)))) - 1) * x
-        self._pid_pos_x = PID(kp=1.0, ki=0.0, kd=0.2, max_control=self._max_velocity,
-                              i_limit=0.0)#, processing_func = pos_pid_processing)
-        self._pid_pos_y = PID(kp=1.0, ki=0.0, kd=0.2, max_control=self._max_velocity,
-                              i_limit=0.0)#, processing_func = pos_pid_processing)
+        pos_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 4.0)))) - 1) * x
+        self._pid_pos_x = PID(kp=1.3, ki=0.0, kd=0.75, max_control=self._max_velocity,
+                              i_limit=0.1)#, processing_func = pos_pid_processing)
+        self._pid_pos_y = PID(kp=0.97, ki=0.00, kd=0.5, max_control=self._max_velocity,
+                              i_limit=0.05)#, processing_func = pos_pid_processing)
 
-        # Скорость → PWM (с экспоненциальной зависимостью для плавности)
-        vel_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 4)))) - 1) * 1.15
-        self._pid_vel_x = PID(kp=6.0, ki=0.1, kd=0.75,
-                              i_limit=0.5, processing_func = vel_pid_processing)
-        self._pid_vel_y = PID(kp=6.0, ki=0.1, kd=0.75,
-                              i_limit=0.5, processing_func = vel_pid_processing)
+        # Скорость → PWM (PD-регулятор, МАКСИМАЛЬНАЯ СТАБИЛЬНОСТЬ)
+        # kp=2.0: меньше начальный толчок
+        # ki=0.0: УБРАН — интеграл раскачивает систему!
+        # kd=8.0: МАКСИМАЛЬНОЕ демпфирование для подавления осцилляций
+        # max_control=1.0: ОГРАНИЧЕНО — дрон не сможет разогнаться слишком сильно
+        #                   PWM диапазон: 1400-1600 (вместо 1300-1700)
+        self._pid_vel_pitch = PID(kp=7.0, ki=0.0, kd=0.45,
+                              max_control=1.5, i_limit=0.15)
+        self._pid_vel_roll = PID(kp=7.0, ki=0.0, kd=0.45,
+                              max_control=1.5, i_limit=0.15)
 
         # Yaw PID (линейный, т.к. точность важна)
         self._pid_yaw = PID(kp=3.5, ki=0.001, kd=0.4, max_control=1.0, i_limit=None)
@@ -91,14 +95,14 @@ class HighLevelSimClient:
         # kp=2.5: ошибка 1м → delta throttle 250
         # ki=0.017: медленное накопление для точного висения
         # kd=7.0: демпфирование
-        heigh_pid_processing = lambda x: ((2/(1+(2.7**(-x * 8)))) - 1) * 1.57 
-        self._pid_height = PID(kp=3.5, ki=0.1, kd=0.5,
+        heigh_pid_processing = lambda x: ((2/(1+(2.7**(-x * 3)))) - 1) * 1.55 
+        self._pid_height = PID(kp=5.0, ki=0.125, kd=0.8,
                                i_limit=12, processing_func=heigh_pid_processing)
 
         # Базовый throttle для висения (подобран экспериментально для TechSim)
         self._base_throttle_hover = 1500  # 1500 для висения с PosHold
         self._max_throttle = 1675  # Максимум для взлета/маневров
-        self._min_throttle = 1450  # Минимум для безопасности
+        self._min_throttle = 1475  # Минимум для безопасности
 
         # ===== КОЭФФИЦИЕНТЫ НАПРАВЛЕНИЯ (для подстройки под симулятор) =====
         # +1: PWM растет при движении вперед/вправо/по часовой
@@ -125,6 +129,15 @@ class HighLevelSimClient:
         self._prev_target_vx = 0.0
         self._prev_target_vy = 0.0
         self._prev_target_vz = 0.0
+
+        # ===== LOW-PASS ФИЛЬТР ДЛЯ СКОРОСТИ =====
+        # Коэффициент фильтрации: 0.0 (полное сглаживание) → 1.0 (без фильтрации)
+        # Рекомендуемые значения: 0.2-0.4 для баланса между шумом и отзывчивостью
+        self._vel_filter_alpha = 0.85  # Коэффициент экспоненциального сглаживания
+        self._filtered_vx_world = 0.0  # Отфильтрованная скорость по X
+        self._filtered_vy_world = 0.0  # Отфильтрованная скорость по Y
+        self._vel_filter_initialized = False
+        # =========================================
 
         self._odom = (0.0, 0.0)
         self._altitude = 0.0
@@ -312,8 +325,13 @@ class HighLevelSimClient:
                 self._pid_pos_y.update_control(pos_error_y)
 
                 # Ограничиваем максимальную скорость
-                tvx_world = min(self._pid_pos_x.get_control(), self._max_velocity)
-                tvy_world = min(self._pid_pos_y.get_control(), self._max_velocity)
+                tvx_world = max(min(self._pid_pos_x.get_control(), self._max_velocity),-self._max_velocity)
+                tvy_world = max(min(self._pid_pos_y.get_control(), self._max_velocity),-self._max_velocity)
+
+                if abs(tvx_world) <= 0.075:
+                    tvx_world = -(1 - (1.75**tvx_world))
+                if abs(tvy_world) <= 0.075:
+                    tvy_world = -(1 - (1.75**tvy_world))
 
                 # Нормализуем вектор скорости если он превышает максимум
                 speed = math.hypot(tvx_world, tvy_world)
@@ -322,7 +340,7 @@ class HighLevelSimClient:
                     tvy_world = (tvy_world / speed) * self._max_velocity'''
 
                 self._target_velocity = (tvx_world, tvy_world)
-                print(f"tvx_world {tvx_world:.2} tvt_world {tvy_world:.2}")
+                
 
         except Exception as e:
             logger.warning(f"Error in position_callback: {e}")
@@ -340,16 +358,21 @@ class HighLevelSimClient:
         - yaw=90°: нос дрона → мировая Y-
         - yaw=180°: нос дрона → мировая X-
         - yaw=-90°: нос дрона → мировая Y+
+        
         """
+        
         if not self._simulator_alive:# or self._motors_locked:
+            
             return
 
         try:
             kin = self.get_sim_kinematics()
             if kin is None:
+                
                 return
 
             # Получаем текущую позицию в мировой СК
+            
             x_w = sim_to_api_distance(kin["location"][0])
             y_w = sim_to_api_distance(kin["location"][1])
 
@@ -359,17 +382,39 @@ class HighLevelSimClient:
             sin_yaw = math.sin(yaw)
 
             # Вычисляем текущую скорость в мировой СК (конечные разности)
-            vx_world = (x_w - self._prev_x) * 50  # 50 Гц
-            vy_world = (y_w - self._prev_y) * 50
+            raw_vx_world = (x_w - self._prev_x) * 50  # 50 Гц
+            raw_vy_world = (y_w - self._prev_y) * 50
 
             self._prev_x = x_w
             self._prev_y = y_w
 
+            # ===== LOW-PASS ФИЛЬТРАЦИЯ СКОРОСТИ =====
+            # Экспоненциальное сглаживание: filtered = alpha * raw + (1 - alpha) * prev_filtered
+            if not self._vel_filter_initialized:
+                # Инициализируем фильтр первым измерением
+                self._filtered_vx_world = raw_vx_world
+                self._filtered_vy_world = raw_vy_world
+                self._vel_filter_initialized = True
+            else:
+                alpha = self._vel_filter_alpha
+                self._filtered_vx_world = alpha * raw_vx_world + (1 - alpha) * self._filtered_vx_world
+                self._filtered_vy_world = alpha * raw_vy_world + (1 - alpha) * self._filtered_vy_world
+
+            # Используем отфильтрованную скорость
+            vx_world = self._filtered_vx_world
+            vy_world = self._filtered_vy_world
+            
+            # DEBUG: выводим для диагностики
+            
+            # =========================================
+
             # ===== КОНТУР 2: Скорость → PWM =====
             # Целевая скорость в мировой СК (из position_callback или set_velocity_xy)
             tvx_world, tvy_world = self._target_velocity
-
+            
             # Ограничение ускорения (в мировой СК)
+            #print(f"tvx_world {tvx_world:.2} tvy_world {tvy_world:.2}")
+            
             dvx = tvx_world - self._prev_target_vx
             dvy = tvy_world - self._prev_target_vy
             dt = 0.02  # 50 Гц
@@ -403,19 +448,22 @@ class HighLevelSimClient:
             vel_error_x = tvx_body - vx_body
             vel_error_y = tvy_body - vy_body
 
+            # DEBUG: выводим ошибки в СК дрона
+            print(f"DEBUG body: err=({vel_error_x:.3f}, {vel_error_y:.3f}) target_body=({tvx_body:.3f}, {tvy_body:.3f}) actual_body=({vx_body:.3f}, {vy_body:.3f})")
+
             # PID скорости выдает PWM
             # Отрицательная ошибка → положительный PWM (движемся к цели)
-            self._pid_vel_x.update_control(vel_error_x)
-            self._pid_vel_y.update_control(vel_error_y)
+            self._pid_vel_pitch.update_control(vel_error_x)
+            self._pid_vel_roll.update_control(vel_error_y)
 
             # Применяем коэффициенты направления и конвертируем в PWM
-            pitch_pwm = int(vel_to_rc_signal(self._pid_vel_x.get_control() * self._pitch_direction))
-            roll_pwm = int(vel_to_rc_signal(self._pid_vel_y.get_control() * self._roll_direction))
-
+            pitch_pwm = int(vel_to_rc_signal(self._pid_vel_pitch.get_control() * self._pitch_direction))
+            roll_pwm = int(vel_to_rc_signal(self._pid_vel_roll.get_control() * self._roll_direction))
+            print(f"PWM: roll={roll_pwm} pitch={pitch_pwm} pid_out=({self._pid_vel_pitch.get_control():.3f}, {self._pid_vel_roll.get_control():.3f})")
             # Обновляем roll/pitch, не трогая yaw
             _, _, y = self._rpy_vel_data
             self._rpy_vel_data = (roll_pwm, pitch_pwm, y)
-
+            #print(f"DEBUG: target=({tvx_world:.3f}, {tvy_world:.3f}) actual=({vx_world:.3f}, {vy_world:.3f}) yaw={math.degrees(yaw):.1f}°")
         except Exception as e:
             logger.warning(f"Error in velocity_callback: {e}")
 
@@ -484,10 +532,14 @@ class HighLevelSimClient:
             vy_world = vy
 
         # Ограничиваем скорость максимумом
-        speed = math.hypot(vx_world, vy_world)
+        '''speed = math.hypot(vx_world, vy_world)
+        
         if speed > self._max_velocity:
             vx_world = (vx_world / speed) * self._max_velocity
-            vy_world = (vy_world / speed) * self._max_velocity
+            vy_world = (vy_world / speed) * self._max_velocity'''
+
+        vx_world = max(-self._max_velocity * 2, min(self._max_velocity * 2, vx_world))
+        vy_world = max(-self._max_velocity * 2, min(self._max_velocity * 2, vy_world))
 
         self._target_velocity = (vx_world, vy_world)
 
@@ -599,6 +651,44 @@ class HighLevelSimClient:
             "yaw": self._yaw_direction
         }
 
+    # ===== МЕТОДЫ ДЛЯ НАСТРОЙКИ LOW-PASS ФИЛЬТРА =====
+
+    def set_velocity_filter(self, alpha: float):
+        """
+        Установить коэффициент фильтрации скорости.
+
+        Args:
+            alpha: Коэффициент сглаживания (0.0 - 1.0)
+                   - 0.0: Максимальное сглаживание (очень плавно, но медленно)
+                   - 0.1-0.2: Сильное сглаживание (для очень шумных данных)
+                   - 0.3-0.4: Умеренное сглаживание (рекомендуется)
+                   - 0.5-0.7: Слабое сглаживание (для точных данных)
+                   - 1.0: Без фильтрации (сырые данные)
+
+        Пример:
+            client.set_velocity_filter(0.3)  # Рекомендуемое значение
+            client.set_velocity_filter(0.15)  # Если дрон очень нестабилен
+            client.set_velocity_filter(0.6)   # Если данные очень точные
+        """
+        alpha = max(0.0, min(1.0, alpha))  # Ограничиваем 0-1
+        self._vel_filter_alpha = alpha
+        # Сбрасываем фильтр при изменении коэффициента
+        self._vel_filter_initialized = False
+        logger.info(f"Velocity filter alpha set to {alpha}")
+
+    def get_velocity_filter_alpha(self) -> float:
+        """Получить текущий коэффициент фильтрации скорости"""
+        return self._vel_filter_alpha
+
+    def reset_velocity_filter(self):
+        """Сбросить состояние фильтра"""
+        self._vel_filter_initialized = False
+        self._filtered_vx_world = 0.0
+        self._filtered_vy_world = 0.0
+        logger.info("Velocity filter reset")
+
+    # ==============================================
+
     # ==============================================
 
     def go_to_xy(self, frame: str, x: float, y: float, max_speed: float = 0.5) -> bool:
@@ -617,8 +707,8 @@ class HighLevelSimClient:
         # 1. Сброс PID (ОБЯЗАТЕЛЬНО для предотвращения скачков)
         '''self._pid_pos_x.reset()
         self._pid_pos_y.reset()
-        self._pid_vel_x.reset()
-        self._pid_vel_y.reset()'''
+        self._pid_vel_pitch.reset()
+        self._pid_vel_roll.reset()'''
 
         # 2. Включаем режим позиции
         self._control_mode = "position"
@@ -665,7 +755,7 @@ class HighLevelSimClient:
         #self.unlock_motors()
 
         # 6. Ожидаем достижения цели
-        timeout = 60.0  # секунд
+        timeout = 30.0  # секунд
         start_time = time.monotonic()
         prev_dist = None
 
@@ -689,8 +779,8 @@ class HighLevelSimClient:
                     # Сброс PID и попытка снова
                     self._pid_pos_x.reset()
                     self._pid_pos_y.reset()
-                    self._pid_vel_x.reset()
-                    self._pid_vel_y.reset()
+                    self._pid_vel_pitch.reset()
+                    self._pid_vel_roll.reset()
                     prev_dist = None  # Сброс для новой проверки
                     time.sleep(0.1)
                     continue
@@ -769,8 +859,8 @@ class HighLevelSimClient:
                 # Сброс PID позиции и скорости для предотвращения скачка
                 '''self._pid_pos_x.reset()
                 self._pid_pos_y.reset()
-                self._pid_vel_x.reset()
-                self._pid_vel_y.reset()'''
+                self._pid_vel_pitch.reset()
+                self._pid_vel_roll.reset()'''
 
                 return True
 
@@ -786,8 +876,8 @@ class HighLevelSimClient:
         # Сброс PID позиции и скорости
         '''self._pid_pos_x.reset()
         self._pid_pos_y.reset()
-        self._pid_vel_x.reset()
-        self._pid_vel_y.reset()'''
+        self._pid_vel_pitch.reset()
+        self._pid_vel_roll.reset()'''
 
         return False
     
