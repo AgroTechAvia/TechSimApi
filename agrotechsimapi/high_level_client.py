@@ -60,8 +60,8 @@ class HighLevelSimClient:
     ControlMode = Literal["position", "velocity"]
 
     # ===== НАСТРОЙКИ МАКСИМАЛЬНОЙ СКОРОСТИ И УСКОРЕНИЯ =====
-    _max_velocity = 0.2  # Максимальная скорость (м/с)
-    _max_acceleration = 0.33 # Максимальное ускорение (м/с²)
+    _max_velocity = 0.25  # Максимальная скорость (м/с)
+    _max_acceleration = 0.5 # Максимальное ускорение (м/с²)
     # =======================================================
 
     _z_bias = 0
@@ -69,16 +69,19 @@ class HighLevelSimClient:
     def __init__(self):
         # ===== ПИД-РЕГУЛЯТОРЫ (горизонтальное движение) =====
         # Позиция → Скорость (с экспоненциальной зависимостью для плавности)
-        self._pid_pos_x = PID(kp=1.75, ki=0.0, kd=7.15, max_control=self._max_velocity,
-                              i_limit=0.1**3, is_exp=True)
-        self._pid_pos_y = PID(kp=1.75, ki=0.0, kd=7.15, max_control=self._max_velocity,
-                              i_limit=0.1**3, is_exp=True)
+
+        pos_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 3)))) - 1) * x
+        self._pid_pos_x = PID(kp=0.25, ki=0.0, kd=0.2, max_control=self._max_velocity,
+                              i_limit=0.0, processing_func = pos_pid_processing)
+        self._pid_pos_y = PID(kp=0.25, ki=0.0, kd=0.2, max_control=self._max_velocity,
+                              i_limit=0.0, processing_func = pos_pid_processing)
 
         # Скорость → PWM (с экспоненциальной зависимостью для плавности)
-        self._pid_vel_x = PID(kp=2, ki=0.0, kd=6.0,
-                              i_limit=0.1**3, is_exp=False)
-        self._pid_vel_y = PID(kp=2, ki=0.0, kd=6.0,
-                              i_limit=0.1**3, is_exp=False)
+        vel_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 5)))) - 1) * 1.3
+        self._pid_vel_x = PID(kp=3.0, ki=0.1, kd=1.0,
+                              i_limit=0.5, processing_func = vel_pid_processing)
+        self._pid_vel_y = PID(kp=3.0, ki=0.1, kd=1.0,
+                              i_limit=0.5, processing_func = vel_pid_processing)
 
         # Yaw PID (линейный, т.к. точность важна)
         self._pid_yaw = PID(kp=3.5, ki=0.001, kd=0.4, max_control=1.0, i_limit=None)
@@ -88,15 +91,24 @@ class HighLevelSimClient:
         # kp=2.5: ошибка 1м → delta throttle 250
         # ki=0.017: медленное накопление для точного висения
         # kd=7.0: демпфирование
-        heigh_pid_processing = lambda x: np.sign(x) * (6 ** abs(x))
-        self._pid_height = PID(kp=1.3, ki=0.0, kd=1.5,
-                               i_limit=1.0, processing_func=heigh_pid_processing)
+        heigh_pid_processing = lambda x: ((2/(1+(2.7**(-x * 8)))) - 1) * 1.57 
+        self._pid_height = PID(kp=3.5, ki=0.1, kd=0.5,
+                               i_limit=12, processing_func=heigh_pid_processing)
 
         # Базовый throttle для висения (подобран экспериментально для TechSim)
         self._base_throttle_hover = 1500  # 1500 для висения с PosHold
-        self._max_throttle = 1700  # Максимум для взлета/маневров
-        self._min_throttle = 1470  # Минимум для безопасности
-        
+        self._max_throttle = 1675  # Максимум для взлета/маневров
+        self._min_throttle = 1490  # Минимум для безопасности
+
+        # ===== КОЭФФИЦИЕНТЫ НАПРАВЛЕНИЯ (для подстройки под симулятор) =====
+        # +1: PWM растет при движении вперед/вправо/по часовой
+        # -1: PWM падает при движении вперед/вправо/по часовой
+        # Подберите экспериментально для вашего симулятора
+        self._roll_direction = 1.0    # Направление roll: +1 или -1
+        self._pitch_direction = 1.0   # Направление pitch: +1 или -1
+        self._yaw_direction = 1.0     # Направление yaw: +1 или -1
+        # ====================================================================
+
         # ===== ПЕРЕМЕННЫЕ СОСТОЯНИЯ =====
         self._control_mode = "position"  #: "position" или "velocity"
         self._target_position = (0.0, 0.0)  # Целевая позиция (x, y)
@@ -258,8 +270,8 @@ class HighLevelSimClient:
             self._pid_yaw.update_control(error)
             yaw_rate = self._pid_yaw.get_control()
 
-            # Конвертируем в PWM
-            yaw_pwm = vel_to_rc_signal(yaw_rate)
+            # Конвертируем в PWM с учетом направления
+            yaw_pwm = vel_to_rc_signal(yaw_rate * self._yaw_direction)
 
             # Обновляем только yaw, не трогая roll/pitch
             r, p, _ = self._rpy_vel_data
@@ -271,9 +283,10 @@ class HighLevelSimClient:
     def position_callback(self):
         """
         ВНЕШНИЙ КОНТУР: Позиция → Скорость (20 Гц).
-        
+
         Работает ТОЛЬКО в режиме position.
-        Преобразует ошибку позиции в целевую скорость (в СК дрона).
+        Работает ТОЛЬКО в МИРОВОЙ СК (без учета yaw).
+        Преобразует ошибку позиции в целевую скорость (в мировой СК).
         """
         if not self._simulator_alive:# or self._motors_locked:
             return
@@ -287,49 +300,45 @@ class HighLevelSimClient:
             x_w = sim_to_api_distance(kin["location"][0])
             y_w = sim_to_api_distance(kin["location"][1])
 
-            # Получаем текущий yaw дрона (CW, радианы)
-            yaw = self._get_yaw_cw()
-            cos_yaw = math.cos(yaw)
-            sin_yaw = math.sin(yaw)
-
-            # ===== КОНТУР 1: Позиция → Скорость =====
+            # ===== КОНТУР 1: Позиция → Скорость (в МИРОВОЙ СК) =====
             if self._control_mode == "position":
                 # Вычисляем ошибку позиции в МИРОВОЙ СК
                 tx, ty = self._target_position
                 pos_error_x = tx - x_w  # Ошибка по X мира
                 pos_error_y = ty - y_w  # Ошибка по Y мира
 
-                # === ПРЕОБРАЗОВАНИЕ из мировой СК в СК ДРОНА ===
-                # X_дрона = X_мира * cos(yaw) - Y_мира * sin(yaw)
-                # Y_дрона = X_мира * sin(yaw) + Y_мира * cos(yaw)
-                pos_error_body_x = pos_error_x * cos_yaw - pos_error_y * sin_yaw
-                pos_error_body_y = pos_error_x * sin_yaw + pos_error_y * cos_yaw
-
-                # PID позиции выдает целевую скорость в СК ДРОНА
-                self._pid_pos_x.update_control(pos_error_body_x)
-                self._pid_pos_y.update_control(pos_error_body_y)
+                # PID позиции выдает целевую скорость в МИРОВОЙ СК
+                self._pid_pos_x.update_control(pos_error_x)
+                self._pid_pos_y.update_control(pos_error_y)
 
                 # Ограничиваем максимальную скорость
-                tvx_body = self._pid_pos_x.get_control()
-                tvy_body = self._pid_pos_y.get_control()
+                tvx_world = self._pid_pos_x.get_control()
+                tvy_world = self._pid_pos_y.get_control()
 
                 # Нормализуем вектор скорости если он превышает максимум
-                speed = math.hypot(tvx_body, tvy_body)
+                speed = math.hypot(tvx_world, tvy_world)
                 if speed > self._max_velocity:
-                    tvx_body = (tvx_body / speed) * self._max_velocity
-                    tvy_body = (tvy_body / speed) * self._max_velocity
+                    tvx_world = (tvx_world / speed) * self._max_velocity
+                    tvy_world = (tvy_world / speed) * self._max_velocity
 
-                self._target_velocity = (tvx_body, tvy_body)
-                
+                self._target_velocity = (tvx_world, tvy_world)
+
         except Exception as e:
             logger.warning(f"Error in position_callback: {e}")
 
     def velocity_callback(self):
         """
         ВНУТРЕННИЙ КОНТУР: Скорость → PWM (50 Гц).
-        
+
         Работает ВСЕГДА (и в position, и в velocity режиме).
-        Преобразует ошибку скорости в PWM сигналы (в СК дрона).
+        Преобразует скорости из мировой СК в СК дрона (с учетом yaw).
+        Выдает PWM сигналы для roll/pitch.
+        
+        Конвенция yaw:
+        - yaw=0: нос дрона → мировая X+
+        - yaw=90°: нос дрона → мировая Y-
+        - yaw=180°: нос дрона → мировая X-
+        - yaw=-90°: нос дрона → мировая Y+
         """
         if not self._simulator_alive:# or self._motors_locked:
             return
@@ -348,7 +357,7 @@ class HighLevelSimClient:
             cos_yaw = math.cos(yaw)
             sin_yaw = math.sin(yaw)
 
-            # Вычисляем текущую скорость в мировой СК
+            # Вычисляем текущую скорость в мировой СК (конечные разности)
             vx_world = (x_w - self._prev_x) * 50  # 50 Гц
             vy_world = (y_w - self._prev_y) * 50
 
@@ -356,36 +365,51 @@ class HighLevelSimClient:
             self._prev_y = y_w
 
             # ===== КОНТУР 2: Скорость → PWM =====
-            tvx_body, tvy_body = self._target_velocity
+            # Целевая скорость в мировой СК (из position_callback или set_velocity_xy)
+            tvx_world, tvy_world = self._target_velocity
 
-            # Ограничение ускорения
-            dvx = tvx_body - self._prev_target_vx
-            dvy = tvy_body - self._prev_target_vy
+            # Ограничение ускорения (в мировой СК)
+            dvx = tvx_world - self._prev_target_vx
+            dvy = tvy_world - self._prev_target_vy
             dt = 0.02  # 50 Гц
             accel = math.hypot(dvx / dt, dvy / dt)
 
             if accel > self._max_acceleration:
                 scale = self._max_acceleration / accel
-                tvx_body = self._prev_target_vx + dvx * scale
-                tvy_body = self._prev_target_vy + dvy * scale
+                tvx_world = self._prev_target_vx + dvx * scale
+                tvy_world = self._prev_target_vy + dvy * scale
 
-            self._prev_target_vx = tvx_body
-            self._prev_target_vy = tvy_body
+            self._prev_target_vx = tvx_world
+            self._prev_target_vy = tvy_world
 
-            # === ПРЕОБРАЗОВАНИЕ текущей скорости из мировой СК в СК ДРОНА ===
+            # === ПРЕОБРАЗОВАНИЕ из мировой СК в СК ДРОНА ===
+            # Матрица поворота (мир → дрон):
+            # [ cos_yaw   -sin_yaw ] [vx_world]
+            # [ sin_yaw    cos_yaw ] [vy_world]
+            #
+            # При yaw=0: vx_body = vx_world, vy_body = vy_world
+            # При yaw=90°: vx_body = -vy_world, vy_body = vx_world
+
+            # Целевая скорость в СК дрона
+            tvx_body = tvx_world * cos_yaw - tvy_world * sin_yaw
+            tvy_body = tvx_world * sin_yaw + tvy_world * cos_yaw
+
+            # Текущая скорость в СК дрона
             vx_body = vx_world * cos_yaw - vy_world * sin_yaw
             vy_body = vx_world * sin_yaw + vy_world * cos_yaw
 
-            # Ошибка скорости в СК ДРОНА
+            # Ошибка скорости в СК ДРОНА (target - current)
             vel_error_x = tvx_body - vx_body
             vel_error_y = tvy_body - vy_body
 
             # PID скорости выдает PWM
+            # Отрицательная ошибка → положительный PWM (движемся к цели)
             self._pid_vel_x.update_control(vel_error_x)
             self._pid_vel_y.update_control(vel_error_y)
 
-            pitch_pwm = vel_to_rc_signal(self._pid_vel_x.get_control())
-            roll_pwm = vel_to_rc_signal(-self._pid_vel_y.get_control())
+            # Применяем коэффициенты направления и конвертируем в PWM
+            pitch_pwm = int(vel_to_rc_signal(self._pid_vel_x.get_control() * self._pitch_direction))
+            roll_pwm = int(vel_to_rc_signal(self._pid_vel_y.get_control() * self._roll_direction))
 
             # Обновляем roll/pitch, не трогая yaw
             _, _, y = self._rpy_vel_data
@@ -408,11 +432,12 @@ class HighLevelSimClient:
                 self._altitude = sim_to_api_distance(kin["location"][2])
 
             # Ошибка по высоте
-            height_error = self._target_height - self._altitude + self._z_bias
+            height_error = self._target_height - self._altitude + self._z_bias if self._target_height < 0.3 else self._target_height - self._altitude
+            #print(f"height_error: {height_error}")
 
             # PID высоты выдает delta throttle
             self._pid_height.update_control(height_error)
-            delta_throttle = (self._pid_height.get_control() * 100)
+            delta_throttle = int((self._pid_height.get_control() * 100))# // 2) * 2
 
             # Базовый throttle + коррекция от PID
             throttle_output = self._base_throttle_hover + delta_throttle
@@ -421,30 +446,49 @@ class HighLevelSimClient:
             throttle_output = max(self._min_throttle, min(throttle_output, self._max_throttle))
 
             self._throttle_data = throttle_output
+            #print(f"height_error: {height_error} _throttle_data: {self._throttle_data}")
 
         except Exception as e:
+            print(f"Error in height_callback: {e}")
             logger.warning(f"Error in height_callback: {e}")
         
 
-    def set_velocity_xy(self, vx: float, vy: float):
+    def set_velocity_xy(self, vx: float, vy: float, frame: str = "odom"):
         """
         Установить целевую скорость движения.
-        
-        Переключает в режим velocity и задает скорость в СК дрона.
+
+        Переключает в режим velocity и задает скорость.
 
         Args:
-            vx: Скорость по оси X дрона (м/с)
-            vy: Скорость по оси Y дрона (м/с)
+            vx: Скорость по оси X (м/с)
+            vy: Скорость по оси Y (м/с)
+            frame: Система координат скорости:
+                   - "odom" (по умолчанию): скорость в мировой СК
+                   - "base_link": скорость в СК дрона (будет преобразована в мировую)
         """
         self._control_mode = "velocity"
 
-        # Ограничиваем скорость максимумом
-        speed = math.hypot(vx, vy)
-        if speed > self._max_velocity:
-            vx = (vx / speed) * self._max_velocity
-            vy = (vy / speed) * self._max_velocity
+        # Если скорость задана в СК дрона, преобразуем в мировую СК
+        if frame == "base_link":
+            yaw = self._get_yaw_cw()
+            cos_yaw = math.cos(yaw)
+            sin_yaw = math.sin(yaw)
+            # Матрица поворота (дрон → мир):
+            # [ cos_yaw   sin_yaw ] [vx_body]
+            # [-sin_yaw   cos_yaw ] [vy_body]
+            vx_world = vx * cos_yaw + vy * sin_yaw
+            vy_world = -vx * sin_yaw + vy * cos_yaw
+        else:
+            vx_world = vx
+            vy_world = vy
 
-        self._target_velocity = (vx, vy)
+        # Ограничиваем скорость максимумом
+        speed = math.hypot(vx_world, vy_world)
+        if speed > self._max_velocity:
+            vx_world = (vx_world / speed) * self._max_velocity
+            vy_world = (vy_world / speed) * self._max_velocity
+
+        self._target_velocity = (vx_world, vy_world)
 
     def set_position_mode(self):
         """Включить режим позиции (внешний контур активен)"""
@@ -494,7 +538,68 @@ class HighLevelSimClient:
     def get_max_acceleration(self) -> float:
         """Получить текущее максимальное ускорение"""
         return self._max_acceleration
-    
+
+    # ===== МЕТОДЫ ДЛЯ НАСТРОЙКИ НАПРАВЛЕНИЯ =====
+
+    def set_direction_coefficients(self, roll: float = None, pitch: float = None, yaw: float = None):
+        """
+        Установить коэффициенты направления для roll, pitch и yaw.
+
+        Args:
+            roll: +1 или -1 (направление roll)
+            pitch: +1 или -1 (направление pitch)
+            yaw: +1 или -1 (направление yaw)
+
+        Пример:
+            # Если дрон летит назад вместо вперед:
+            client.set_direction_coefficients(pitch=-1)
+
+            # Если дрон летит влево вместо вправо:
+            client.set_direction_coefficients(roll=-1)
+
+            # Если дрон вращается против часовой вместо по часовой:
+            client.set_direction_coefficients(yaw=-1)
+        """
+        if roll is not None:
+            self._roll_direction = float(roll)
+            logger.info(f"Roll direction set to {self._roll_direction}")
+        if pitch is not None:
+            self._pitch_direction = float(pitch)
+            logger.info(f"Pitch direction set to {self._pitch_direction}")
+        if yaw is not None:
+            self._yaw_direction = float(yaw)
+            logger.info(f"Yaw direction set to {self._yaw_direction}")
+
+    def invert_roll(self):
+        """Инвертировать направление roll"""
+        self._roll_direction *= -1
+        logger.info(f"Roll direction inverted, now: {self._roll_direction}")
+
+    def invert_pitch(self):
+        """Инвертировать направление pitch"""
+        self._pitch_direction *= -1
+        logger.info(f"Pitch direction inverted, now: {self._pitch_direction}")
+
+    def invert_yaw(self):
+        """Инвертировать направление yaw"""
+        self._yaw_direction *= -1
+        logger.info(f"Yaw direction inverted, now: {self._yaw_direction}")
+
+    def get_direction_coefficients(self) -> dict:
+        """
+        Получить текущие коэффициенты направления.
+
+        Returns:
+            Словарь с коэффициентами roll, pitch, yaw
+        """
+        return {
+            "roll": self._roll_direction,
+            "pitch": self._pitch_direction,
+            "yaw": self._yaw_direction
+        }
+
+    # ==============================================
+
     def go_to_xy(self, frame: str, x: float, y: float, max_speed: float = 0.5) -> bool:
         """
         Полет в заданную точку.
@@ -533,11 +638,21 @@ class HighLevelSimClient:
             else:
                 self._target_position = (x, y)
         elif frame == "base_link":
-            _, _, yaw = self._get_yaw_cw()
-            self._target_position = (
-                cx + math.cos(yaw) * x - math.sin(yaw) * y,
-                cy + math.sin(yaw) * x + math.cos(yaw) * y
-            )
+            # Преобразуем из СК дрона в мировую СК
+            # Согласно конвенции yaw:
+            # При yaw=0: X дрона = X мира, Y дрона = Y мира
+            # При yaw=90°: X дрона = -Y мира, Y дрона = X мира
+            #
+            # Матрица поворота (дрон → мир):
+            # [ cos_yaw   sin_yaw ] [x_body]
+            # [-sin_yaw   cos_yaw ] [y_body]
+            yaw = self._get_yaw_cw()
+            cos_yaw = math.cos(yaw)
+            sin_yaw = math.sin(yaw)
+            
+            target_x_world = cx + x * cos_yaw + y * sin_yaw
+            target_y_world = cy - x * sin_yaw + y * cos_yaw
+            self._target_position = (target_x_world, target_y_world)
         else:
             raise ValueError("frame must be 'odom' or 'base_link'")
 
@@ -765,9 +880,9 @@ class HighLevelSimClient:
         print("TAKE OFF")
         PERIOD = 0.05
         MIN_H = 0.00
-        TAKEOFF_H = 1.0
+        TAKEOFF_H = 1.05
         MAX_H = 5.00
-        REACH_COEF = 0.99
+        REACH_COEF = 0.93
         TIMEOUT_COEF = 10.0
 
         #self.unlock_motors()
@@ -800,7 +915,7 @@ class HighLevelSimClient:
         PERIOD = 0.05
         MIN_H = 0.00
         MAX_H = 5.00
-        STEP = 0.05
+        STEP = 0.1
         TIMEOUT_MIN = 15.0
         TIMEOUT_COEF = 10.0
 
@@ -839,7 +954,7 @@ class HighLevelSimClient:
         MIN_H = 0.00
         MAX_H = 5.00
         STEP = 0.005
-        REACH_COEF = 0.97
+        REACH_COEF = 0.93
         TIMEOUT_MIN = 15.0
         TIMEOUT_COEF = 10.0
 
@@ -945,13 +1060,23 @@ class HighLevelSimClient:
     
     def setVelXY(self, x, y):
         """Устаревший метод, использовать set_velocity_xy"""
-        self.set_velocity_xy(x, y)
+        self.set_velocity_xy(x, y, frame="odom")
     
     def setVelXYYaw(self, x, y, yaw):
-        rpy = self._rpy_vel_data
-        rc_x = vel_to_rc_signal(x)
-        rc_y = vel_to_rc_signal(y)
-        self._rpy_vel_data = (rc_y, rc_x, rpy[2])
+        """
+        Устаревший метод - используйте set_velocity_xy и setYaw отдельно.
+        
+        Этот метод теперь просто делегирует set_velocity_xy,
+        а yaw игнорируется (для обратной совместимости).
+        
+        Args:
+            x: Скорость по X в мировой СК (м/с)
+            y: Скорость по Y в мировой СК (м/с)
+            yaw: Игнорируется (оставлен для обратной совместимости)
+        """
+        logger.warning("setVelXYYaw is deprecated, use set_velocity_xy + setYaw")
+        # Преобразуем в мировую СК (предполагаем, что входные данные в СК дрона)
+        self.set_velocity_xy(x, y, frame="base_link")
     
     def armDrone(self):
         """

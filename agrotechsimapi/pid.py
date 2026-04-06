@@ -57,11 +57,10 @@ class PID:
         self.previous_error = self.current_error
         self.current_error = current_error
 
-        # Применяем нелинейность к ошибке
-        #error_nl = self._apply_nonlinearity(self.current_error)
-        #prev_error_nl = self._apply_nonlinearity(self.previous_error)
-        error_nl = self._processing_func(self.current_error)
-        prev_error_nl = self._processing_func(self.previous_error)
+        # Применяем нелинейность к ошибке (если нужна нелинейная обработка ошибки)
+        error_nl = self._apply_nonlinearity(self.current_error)
+        prev_error_nl = self._apply_nonlinearity(self.previous_error)
+
         # накапливаем интеграл и жёстко ограничиваем его по i_limit
         self.integral += error_nl
         if self.i_limit is not None:
@@ -73,20 +72,21 @@ class PID:
         # дифференциал по тикам
         self.derivative = error_nl - prev_error_nl
 
-        # PID-выход
+        # PID-выход (линейная комбинация)
         u = (
             self.kp * error_nl +
             self.ki * self.integral +
             self.kd * self.derivative
         )
 
-        # сатурация выхода
+        # Сначала применяем ограничение по max_control
         if u > self.max_control:
             u = self.max_control
         elif u < -self.max_control:
             u = -self.max_control
 
-        self.control = u
+        # Затем применяем processing_func к ВЫХОДУ (например, сигмоиду)
+        self.control = self._processing_func(u)
 
     def get_control(self):
         return self.control
