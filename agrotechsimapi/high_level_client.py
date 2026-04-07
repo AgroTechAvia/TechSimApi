@@ -70,8 +70,10 @@ class HighLevelSimClient:
         # ===== ПИД-РЕГУЛЯТОРЫ (горизонтальное движение) =====
         # Позиция → Скорость (с экспоненциальной зависимостью для плавности)
 
+        self.camera_id = 0
+
         pos_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 4.0)))) - 1) * x
-        self._pid_pos_x = PID(kp=1.3, ki=0.0, kd=0.75, max_control=self._max_velocity,
+        self._pid_pos_x = PID(kp=1.25, ki=0.0, kd=0.5, max_control=self._max_velocity,
                               i_limit=0.1)#, processing_func = pos_pid_processing)
         self._pid_pos_y = PID(kp=0.97, ki=0.00, kd=0.5, max_control=self._max_velocity,
                               i_limit=0.05)#, processing_func = pos_pid_processing)
@@ -133,7 +135,7 @@ class HighLevelSimClient:
         # ===== LOW-PASS ФИЛЬТР ДЛЯ СКОРОСТИ =====
         # Коэффициент фильтрации: 0.0 (полное сглаживание) → 1.0 (без фильтрации)
         # Рекомендуемые значения: 0.2-0.4 для баланса между шумом и отзывчивостью
-        self._vel_filter_alpha = 0.85  # Коэффициент экспоненциального сглаживания
+        self._vel_filter_alpha = 0.55  # Коэффициент экспоненциального сглаживания
         self._filtered_vx_world = 0.0  # Отфильтрованная скорость по X
         self._filtered_vy_world = 0.0  # Отфильтрованная скорость по Y
         self._vel_filter_initialized = False
@@ -1092,6 +1094,9 @@ class HighLevelSimClient:
         #self.lock_motors()
         return True
     
+    def set_camera_id(self, new_id: int):
+        self.camera_id = new_id
+    
     def sim_kinematics_callback(self):
         """Обновление данных кинематики"""
         if not self._simulator_alive:
@@ -1107,7 +1112,7 @@ class HighLevelSimClient:
                 else:
                     try:
                         self._sim_kinematics = self._client.get_kinametics_data()
-                        self._sim_img = self._client.get_camera_capture(camera_id=1)
+                        self._sim_img = self._client.get_camera_capture(camera_id=self.camera_id)
                         self._sim_ultrasonic = self._client.get_range_data(
                             rangefinder_id=0,
                             range_min=0.15,
