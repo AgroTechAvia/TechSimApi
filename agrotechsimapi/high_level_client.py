@@ -84,10 +84,10 @@ class HighLevelSimClient:
         # kd=8.0: МАКСИМАЛЬНОЕ демпфирование для подавления осцилляций
         # max_control=1.0: ОГРАНИЧЕНО — дрон не сможет разогнаться слишком сильно
         #                   PWM диапазон: 1400-1600 (вместо 1300-1700)
-        self._pid_vel_pitch = PID(kp=8.0, ki=0.0, kd=8.0,
-                              max_control=1.5, i_limit=0.15)
-        self._pid_vel_roll = PID(kp=8.0, ki=0.0, kd=8.0,
-                              max_control=1.5, i_limit=0.15)
+        self._pid_vel_pitch = PID(kp=7.25, ki=0.00075, kd=7.0,
+                              max_control=1.5, i_limit=0.007)
+        self._pid_vel_roll = PID(kp=7.25, ki=0.00075, kd=7.0,
+                              max_control=1.5, i_limit=0.007)
 
         # Yaw PID (линейный, т.к. точность важна)
         self._pid_yaw = PID(kp=3.5, ki=0.001, kd=0.4, max_control=1.0, i_limit=None)
@@ -451,7 +451,7 @@ class HighLevelSimClient:
             vel_error_y = tvy_body - vy_body
 
             # DEBUG: выводим ошибки в СК дрона
-            print(f"DEBUG body: err=({vel_error_x:.3f}, {vel_error_y:.3f}) target_body=({tvx_body:.3f}, {tvy_body:.3f}) actual_body=({vx_body:.3f}, {vy_body:.3f})")
+            #print(f"DEBUG body: err=({vel_error_x:.3f}, {vel_error_y:.3f}) target_body=({tvx_body:.3f}, {tvy_body:.3f}) actual_body=({vx_body:.3f}, {vy_body:.3f})")
 
             # PID скорости выдает PWM
             # Отрицательная ошибка → положительный PWM (движемся к цели)
@@ -461,7 +461,7 @@ class HighLevelSimClient:
             # Применяем коэффициенты направления и конвертируем в PWM
             pitch_pwm = int(vel_to_rc_signal(self._pid_vel_pitch.get_control() * self._pitch_direction))
             roll_pwm = int(vel_to_rc_signal(self._pid_vel_roll.get_control() * self._roll_direction))
-            print(f"PWM: roll={roll_pwm} pitch={pitch_pwm} pid_out=({self._pid_vel_pitch.get_control():.3f}, {self._pid_vel_roll.get_control():.3f})")
+            #print(f"PWM: roll={roll_pwm} pitch={pitch_pwm} pid_out=({self._pid_vel_pitch.get_control():.3f}, {self._pid_vel_roll.get_control():.3f})")
             # Обновляем roll/pitch, не трогая yaw
             _, _, y = self._rpy_vel_data
             self._rpy_vel_data = (roll_pwm, pitch_pwm, y)
@@ -757,7 +757,11 @@ class HighLevelSimClient:
         #self.unlock_motors()
 
         # 6. Ожидаем достижения цели
-        timeout = 30.0  # секунд
+
+        tx, ty = self._target_position
+        dist = math.hypot(tx - cx, ty - cy)
+        
+        timeout = 5.0 + (dist / (self._max_velocity * 0.5)) # секунд
         start_time = time.monotonic()
         prev_dist = None
 
@@ -978,31 +982,33 @@ class HighLevelSimClient:
         REACH_COEF = 0.93
         TIMEOUT_COEF = 10.0
 
-        #self.unlock_motors()
-        
+        # Если дрон в режиме velocity, переключаемся в position и фиксируем текущую позицию
+        if self._control_mode == "velocity":
+            kin = self.get_sim_kinematics()
+            if kin is not None:
+                cx = sim_to_api_distance(kin["location"][0])
+                cy = sim_to_api_distance(kin["location"][1])
+                self._target_position = (cx, cy)
+                self._control_mode = "position"
+                logger.info("takeoff: switched to position mode, locked current position")
+
         h_now = self._get_height()
         tgt = self._clamp_h(TAKEOFF_H, MIN_H, MAX_H)
-        
+
         self.set_target_height(tgt)
-        
+
         climb = max(0.0, tgt - h_now)
         deadline = time.monotonic() + (TIMEOUT_COEF * climb if climb > 0.0 else TIMEOUT_COEF)
-        
+
         while True:
             h = self._get_height()
             if h >= REACH_COEF * tgt:
-                
-                #self.lock_motors()
                 return True
             if time.monotonic() >= deadline:
-                
-                #self.lock_motors()
                 return False
             if not self._sleep_until(deadline, PERIOD):
-                
-                #self.lock_motors()
                 return False
-    
+
     def boarding(self) -> bool:
         """Посадка дрона"""
         PERIOD = 0.05
@@ -1012,35 +1018,35 @@ class HighLevelSimClient:
         TIMEOUT_MIN = 15.0
         TIMEOUT_COEF = 10.0
 
-        #self.unlock_motors()
         print("BOARDING")
+
+        # Если дрон в режиме velocity, фиксируем текущую позицию и переключаемся в position
+        if self._control_mode == "velocity":
+            kin = self.get_sim_kinematics()
+            if kin is not None:
+                cx = sim_to_api_distance(kin["location"][0])
+                cy = sim_to_api_distance(kin["location"][1])
+                self._target_position = (cx, cy)
+                self._control_mode = "position"
+                logger.info("boarding: switched to position mode, locked current position")
 
         curr_cmd = float(getattr(self, "_target_height", 0.0))
         curr_cmd = self._clamp_h(curr_cmd, MIN_H, MAX_H)
-        
+
         total_drop = max(0.0, curr_cmd - MIN_H)
         deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * total_drop
-        
+
         while curr_cmd > MIN_H:
             curr_cmd = max(MIN_H, curr_cmd - STEP)
             self.set_target_height(curr_cmd)
-            #time.sleep(0.1)
             if time.monotonic() >= deadline:
-                
-                #self.lock_motors()
                 return False
             if not self._sleep_until(deadline, PERIOD):
-                
-                #self.lock_motors()
                 return False
-        
+
         self._target_height = 0.0
-        #self._pid_height_pos.reset()
-        #self._pid_height_vel.reset()
-        
-        #self.lock_motors()
         return True
-    
+
     def setHeight(self, target_height: float) -> bool:
         """Установка высоты"""
         PERIOD = 0.05
@@ -1051,47 +1057,43 @@ class HighLevelSimClient:
         TIMEOUT_MIN = 15.0
         TIMEOUT_COEF = 10.0
 
-        #self.unlock_motors()
-        
+        # Если дрон в режиме velocity, фиксируем текущую позицию и переключаемся в position
+        if self._control_mode == "velocity":
+            kin = self.get_sim_kinematics()
+            if kin is not None:
+                cx = sim_to_api_distance(kin["location"][0])
+                cy = sim_to_api_distance(kin["location"][1])
+                self._target_position = (cx, cy)
+                self._control_mode = "position"
+                logger.info("setHeight: switched to position mode, locked current position")
+
         tgt = self._clamp_h(float(target_height), MIN_H, MAX_H)
         h0 = self._get_height()
-        
+
         if tgt >= h0:
             self.set_target_height(tgt)
             deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * max(0.0, tgt - h0)
             while True:
                 h = self._get_height()
                 if h >= REACH_COEF * tgt:
-                    
-                    #self.lock_motors()
                     return True
                 if time.monotonic() >= deadline:
-                    
-                    #self.lock_motors()
                     return False
                 if not self._sleep_until(deadline, PERIOD):
-                    
-                    #self.lock_motors()
                     return False
         else:
             curr_cmd = float(getattr(self, "_target_height", h0))
             curr_cmd = self._clamp_h(curr_cmd, MIN_H, MAX_H)
             deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * max(0.0, curr_cmd - tgt)
-            
+
             while curr_cmd > tgt:
                 curr_cmd = max(tgt, curr_cmd - STEP)
                 self.set_target_height(curr_cmd)
                 if time.monotonic() >= deadline:
-                    
-                    #self.lock_motors()
                     return False
                 if not self._sleep_until(deadline, PERIOD):
-                    
-                    #self.lock_motors()
                     return False
-        
-        
-        #self.lock_motors()
+
         return True
     
     def set_camera_id(self, new_id: int):
