@@ -73,9 +73,9 @@ class HighLevelSimClient:
         self.camera_id = 0
 
         pos_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 4.0)))) - 1) * x
-        self._pid_pos_x = PID(kp=1.25, ki=0.0, kd=0.5, max_control=self._max_velocity,
+        self._pid_pos_x = PID(kp=1.5, ki=0.0, kd=1.7, max_control=self._max_velocity,
                               i_limit=0.1)#, processing_func = pos_pid_processing)
-        self._pid_pos_y = PID(kp=0.97, ki=0.00, kd=0.5, max_control=self._max_velocity,
+        self._pid_pos_y = PID(kp=1.5, ki=0.0, kd=1.7, max_control=self._max_velocity,
                               i_limit=0.05)#, processing_func = pos_pid_processing)
 
         # Скорость → PWM (PD-регулятор, МАКСИМАЛЬНАЯ СТАБИЛЬНОСТЬ)
@@ -84,9 +84,9 @@ class HighLevelSimClient:
         # kd=8.0: МАКСИМАЛЬНОЕ демпфирование для подавления осцилляций
         # max_control=1.0: ОГРАНИЧЕНО — дрон не сможет разогнаться слишком сильно
         #                   PWM диапазон: 1400-1600 (вместо 1300-1700)
-        self._pid_vel_pitch = PID(kp=7.0, ki=0.0, kd=0.45,
+        self._pid_vel_pitch = PID(kp=8.0, ki=0.0, kd=8.0,
                               max_control=1.5, i_limit=0.15)
-        self._pid_vel_roll = PID(kp=7.0, ki=0.0, kd=0.45,
+        self._pid_vel_roll = PID(kp=8.0, ki=0.0, kd=8.0,
                               max_control=1.5, i_limit=0.15)
 
         # Yaw PID (линейный, т.к. точность важна)
