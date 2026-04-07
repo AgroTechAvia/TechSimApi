@@ -1095,7 +1095,8 @@ class HighLevelSimClient:
         return True
     
     def set_camera_id(self, new_id: int):
-        self.camera_id = new_id
+        with self._client_lock:
+            self.camera_id = new_id
     
     def sim_kinematics_callback(self):
         """Обновление данных кинематики"""
