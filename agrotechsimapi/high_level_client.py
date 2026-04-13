@@ -73,9 +73,9 @@ class HighLevelSimClient:
         self.camera_id = 0
 
         pos_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 4.0)))) - 1) * x
-        self._pid_pos_x = PID(kp=1.5, ki=0.0, kd=1.7, max_control=self._max_velocity,
+        self._pid_pos_x = PID(kp=1.55, ki=0.0, kd=1.75, max_control=self._max_velocity,
                               i_limit=0.1)#, processing_func = pos_pid_processing)
-        self._pid_pos_y = PID(kp=1.5, ki=0.0, kd=1.7, max_control=self._max_velocity,
+        self._pid_pos_y = PID(kp=1.55, ki=0.0, kd=1.75, max_control=self._max_velocity,
                               i_limit=0.05)#, processing_func = pos_pid_processing)
 
         # Скорость → PWM (PD-регулятор, МАКСИМАЛЬНАЯ СТАБИЛЬНОСТЬ)
@@ -84,10 +84,10 @@ class HighLevelSimClient:
         # kd=8.0: МАКСИМАЛЬНОЕ демпфирование для подавления осцилляций
         # max_control=1.0: ОГРАНИЧЕНО — дрон не сможет разогнаться слишком сильно
         #                   PWM диапазон: 1400-1600 (вместо 1300-1700)
-        self._pid_vel_pitch = PID(kp=7.25, ki=0.00075, kd=7.0,
-                              max_control=1.5, i_limit=0.007)
-        self._pid_vel_roll = PID(kp=7.25, ki=0.00075, kd=7.0,
-                              max_control=1.5, i_limit=0.007)
+        self._pid_vel_pitch = PID(kp=3.25, ki=0.0, kd=3.25,
+                              max_control=1.5, i_limit=0.005)
+        self._pid_vel_roll = PID(kp=3.25, ki=0.0, kd=3.25,
+                              max_control=1.5, i_limit=0.005)
 
         # Yaw PID (линейный, т.к. точность важна)
         self._pid_yaw = PID(kp=3.5, ki=0.001, kd=0.4, max_control=1.0, i_limit=None)
@@ -169,6 +169,10 @@ class HighLevelSimClient:
         self._simulator_alive = True
         self._on_death_callback = None
         # =================================================
+
+        # ===== ФЛАГ АВАРИЙНОЙ ОСТАНОВКИ =====
+        self._is_abort = False  # Флаг для прерывания blocking операций
+        # =====================================
 
         print("process started")
     
@@ -761,13 +765,18 @@ class HighLevelSimClient:
         tx, ty = self._target_position
         dist = math.hypot(tx - cx, ty - cy)
         
-        timeout = 5.0 + (dist / (self._max_velocity * 0.5)) # секунд
+        timeout = 5.0 + (3 * dist / (self._max_velocity )) # секунд
         start_time = time.monotonic()
         prev_dist = None
 
         while time.monotonic() - start_time < timeout:
             if not self._simulator_alive:
                 logger.warning("Simulator died during go_to_xy")
+                return False
+
+            if self._is_abort:
+                self._is_abort = False
+                logger.info("go_to_xy: aborted")
                 return False
 
             # Проверяем расстояние до цели
@@ -828,6 +837,9 @@ class HighLevelSimClient:
             True если достиг угла, False если таймаут
         """
         # Сброс PID yaw
+
+        self._is_abort = False
+        
         self._pid_yaw.reset()
 
         # Нормализуем цель
@@ -847,8 +859,11 @@ class HighLevelSimClient:
 
         while time.monotonic() - start_time < timeout:
             if not self._simulator_alive:
-                # ===== РАЗБЛОКИРОВКА при смерти симулятора =====
-                #self.unlock_motors()
+                return False
+
+            if self._is_abort:
+                self._is_abort = False
+                logger.info("setYaw: aborted")
                 return False
 
             current = self._get_yaw_cw()
@@ -929,6 +944,16 @@ class HighLevelSimClient:
     def getUltrasonic(self):
         with self._client_lock:
             return self._sim_ultrasonic
+        
+    def getUltrasonicById(self, sonic_id: int):
+        with self._client_lock:
+            return self._client.get_range_data(
+                                            rangefinder_id=sonic_id,
+                                            range_min=0.15,
+                                            range_max=4,
+                                            is_clear=True,
+                                            range_error=0.0003
+                                            ) 
 
     def getRPY(self):
         kin = self.get_sim_kinematics()
@@ -1001,6 +1026,10 @@ class HighLevelSimClient:
         deadline = time.monotonic() + (TIMEOUT_COEF * climb if climb > 0.0 else TIMEOUT_COEF)
 
         while True:
+            if self._is_abort:
+                self._is_abort = False
+                logger.info("takeoff: aborted")
+                return False
             h = self._get_height()
             if h >= REACH_COEF * tgt:
                 return True
@@ -1017,6 +1046,8 @@ class HighLevelSimClient:
         STEP = 0.1
         TIMEOUT_MIN = 15.0
         TIMEOUT_COEF = 10.0
+
+        self._is_abort = False
 
         print("BOARDING")
 
@@ -1037,6 +1068,10 @@ class HighLevelSimClient:
         deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * total_drop
 
         while curr_cmd > MIN_H:
+            if self._is_abort:
+                self._is_abort = False
+                logger.info("boarding: aborted")
+                return False
             curr_cmd = max(MIN_H, curr_cmd - STEP)
             self.set_target_height(curr_cmd)
             if time.monotonic() >= deadline:
@@ -1057,6 +1092,8 @@ class HighLevelSimClient:
         TIMEOUT_MIN = 15.0
         TIMEOUT_COEF = 10.0
 
+        self._is_abort = False
+
         # Если дрон в режиме velocity, фиксируем текущую позицию и переключаемся в position
         if self._control_mode == "velocity":
             kin = self.get_sim_kinematics()
@@ -1074,6 +1111,11 @@ class HighLevelSimClient:
             self.set_target_height(tgt)
             deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * max(0.0, tgt - h0)
             while True:
+                if self._is_abort:
+                    self._is_abort = False
+                    logger.info("setHeight: aborted")
+                    return False
+
                 h = self._get_height()
                 if h >= REACH_COEF * tgt:
                     return True
@@ -1087,6 +1129,10 @@ class HighLevelSimClient:
             deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * max(0.0, curr_cmd - tgt)
 
             while curr_cmd > tgt:
+                if self._is_abort:
+                    self._is_abort = False
+                    logger.info("setHeight: aborted")
+                    return False
                 curr_cmd = max(tgt, curr_cmd - STEP)
                 self.set_target_height(curr_cmd)
                 if time.monotonic() >= deadline:
@@ -1375,3 +1421,14 @@ class HighLevelSimClient:
                     self._velocity_timer.stop()
         except Exception:
             pass
+
+    def abort(self):
+        with self._client_lock:
+            self._is_abort = True
+
+            kin = self.get_sim_kinematics()
+            if kin is not None:
+                cx = sim_to_api_distance(kin["location"][0])
+                cy = sim_to_api_distance(kin["location"][1])
+                self._target_position = (cx, cy)
+                self._control_mode = "position"
