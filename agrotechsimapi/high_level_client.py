@@ -102,7 +102,7 @@ class HighLevelSimClient:
                                i_limit=12, processing_func=heigh_pid_processing)
 
         # Базовый throttle для висения (подобран экспериментально для TechSim)
-        self._base_throttle_hover = 1500  # 1500 для висения с PosHold
+        self._base_throttle_hover = 1000  # 1500 для висения с PosHold
         self._max_throttle = 1675  # Максимум для взлета/маневров
         self._min_throttle = 1475  # Минимум для безопасности
 
@@ -147,6 +147,7 @@ class HighLevelSimClient:
 
         self._armed_flag = False
         self._poshold_flag = False
+        self._althold_flag = False
 
         self._sim_img = None
         self._blob_img = None
@@ -187,6 +188,8 @@ class HighLevelSimClient:
         self.__tcp_transmitter.connect()
         self._control = MultirotorControl(self.__tcp_transmitter)
         time.sleep(2)
+        print("=== Adding ALTHOLD range... ===")
+        self.add_range_for_althold()
 
         # Сброс флагов арминга в MSP (важно для повторного подключения!)
         print("=== Resetting MSP arming flags... ===")
@@ -229,12 +232,15 @@ class HighLevelSimClient:
         self._yaw_timer.start()
         self._position_timer.start()
         self._velocity_timer.start()
-        
+
 
         # Даем время на инициализацию и отправку RC команд
         time.sleep(1)
         # initDrone() уже установил _arm_data = 1000, таймеры отправляют это значение
         time.sleep(1)
+
+        # Добавляем диапазон для NAV ALTHOLD (если еще не добавлен)
+
     
     def disconnect(self):
         """Отключение от симулятора"""
@@ -1193,7 +1199,7 @@ class HighLevelSimClient:
         """Отправка RC команд"""
         if not self._simulator_alive:
             return
-        
+
         try:
             roll, pitch, yaw = self._rpy_vel_data
             raw_rc = [roll, pitch, self._throttle_data, yaw, self._arm_data, self._fliyng_mode, self._nav_mode]
@@ -1276,7 +1282,141 @@ class HighLevelSimClient:
         self._poshold_flag = False
         self._nav_mode = 1000
         self._throttle_data = 1000
+        self._base_throttle_hover = 1000
+        self._pid_height.reset()
+        self.lock_motors()
+
+    def add_range_for_althold(self, mode_id=3, channel_index=2, range_start=1250, range_end=1350):
+        """
+        Добавляет новый диапазон активации для NAV ALTHOLD на указанном канале.
+        Если диапазон уже существует, операция пропускается.
+
+        Args:
+            mode_id: ID режима (3 = NAV ALTHOLD)
+            channel_index: Индекс AUX канала (0=CH5, 1=CH6, 2=CH7, ...)
+            range_start: Начальное значение диапазона в мкс (по умолчанию 1250)
+            range_end: Конечное значение диапазона в мкс (по умолчанию 1350)
+
+        Returns:
+            True если диапазон добавлен или уже существует, False в случае ошибки
+        """
+        def encode_range_value(us_value):
+            """Кодирует мкс в байт: (значение - 900) / 25"""
+            return int((us_value - 900) / 25)
+
+        def find_mode_ranges(msp, mode_id, channel_index):
+            """Находит все range entry для конкретного режима на конкретном канале."""
+            results = []
+            for i, mr in enumerate(msp.MODE_RANGES):
+                if (mr['id'] == mode_id and
+                    mr['auxChannelIndex'] == channel_index):
+                    results.append((i, mr))
+            return results
+
+        def find_first_empty_range(msp):
+            """Находит первый пустой (неиспользуемый) range entry в массиве."""
+            for i, mr in enumerate(msp.MODE_RANGES):
+                if mr['id'] == 0 and mr['range']['start'] == 900 and mr['range']['end'] == 900:
+                    return i
+            return None
+
+        try:
+            # 1. Читаем текущие range
+            self._control.send_RAW_msg(MSPCodes['MSP_MODE_RANGES'], data=[])
+            data_handler = self._control.receive_msg()
+            self._control.process_recv_data(data_handler)
+
+            if not self._control.MODE_RANGES:
+                logger.warning("MODE_RANGES пуст!")
+                return False
+
+            # 2. Проверяем, какие range уже есть
+            existing = find_mode_ranges(self._control, mode_id, channel_index)
+            logger.info(f"Найдено существующих диапазонов NAV ALTHOLD на CH{5 + channel_index}: {len(existing)}")
+            for idx, mr in existing:
+                logger.info(f"  [{idx}] {mr['range']['start']}-{mr['range']['end']}")
+
+            # 3. Проверяем, нет ли уже такого диапазона
+            for _, mr in existing:
+                if mr['range']['start'] == range_start and mr['range']['end'] == range_end:
+                    logger.info(f"Диапазон {range_start}-{range_end} уже существует!")
+                    return True
+
+            # 4. Ищем пустой entry для нового диапазона
+            empty_index = find_first_empty_range(self._control)
+            if empty_index is None:
+                logger.warning("Нет свободных range entry! Массив полностью заполнен.")
+                logger.warning(f"Всего entries: {len(self._control.MODE_RANGES)}")
+                return False
+
+            logger.info(f"Свободный range entry найден: index={empty_index}")
+
+            # 5. Формируем payload для MSP_SET_MODE_RANGE
+            payload = [
+                empty_index,                         # index пустого entry
+                mode_id,                             # modeId NAV ALTHOLD
+                channel_index,                       # auxChannelIndex
+                encode_range_value(range_start),     # start encoded
+                encode_range_value(range_end),       # end encoded
+            ]
+
+            logger.info(f"\nДобавляю диапазон: {range_start}-{range_end}")
+            logger.info(f"  rangeIndex     = {payload[0]}")
+            logger.info(f"  modeId         = {payload[1]} (NAV ALTHOLD)")
+            logger.info(f"  auxChannelIndex= {payload[2]} (CH{5 + payload[2]})")
+            logger.info(f"  start          = {range_start} (encoded: {payload[3]})")
+            logger.info(f"  end            = {range_end} (encoded: {payload[4]})")
+
+            self._control.send_RAW_msg(MSPCodes['MSP_SET_MODE_RANGE'], data=payload)
+            time.sleep(0.3)
+
+            # 6. Сохраняем в EEPROM
+            logger.info("Сохраняю в EEPROM...")
+            self._control.send_RAW_msg(MSPCodes['MSP_EEPROM_WRITE'], data=[])
+            time.sleep(0.5)
+
+            # 7. Проверяем
+            self._control.send_RAW_msg(MSPCodes['MSP_MODE_RANGES'], data=[])
+            data_handler = self._control.receive_msg()
+            self._control.process_recv_data(data_handler)
+
+            updated = find_mode_ranges(self._control, mode_id, channel_index)
+            logger.info(f"\nВсе диапазоны NAV ALTHOLD на CH{5 + channel_index}:")
+            for idx, mr in updated:
+                logger.info(f"  [{idx}] {mr['range']['start']}-{mr['range']['end']}")
+
+            # Проверяем, что новый диапазон появился
+            for _, mr in updated:
+                if mr['range']['start'] == range_start and mr['range']['end'] == range_end:
+                    logger.info("УСПЕХ! Новый диапазон добавлен!")
+                    return True
+
+            logger.warning("ВНИМАНИЕ: диапазон не появился после сохранения!")
+            return False
+
+        except Exception as e:
+            logger.error(f"Ошибка при добавлении диапазона для ALTHOLD: {e}")
+            return False
+
+    def altholdOn(self):
+        """
+        Включает режим NAV ALTHOLD.
+        Аналогично posholdOn, но использует значение 1300 для активации ALTHOLD.
+        """
+        self._althold_flag = True
+        self._nav_mode = 1300  # Значение для активации ALTHOLD
         self._base_throttle_hover = 1500
+        self.unlock_motors()
+
+    def altholdOff(self):
+        """
+        Выключает режим NAV ALTHOLD.
+        Аналогично posholdOff, но сбрасывает канал ALTHOLD в 1000.
+        """
+        self._althold_flag = False
+        self._nav_mode = 1000
+        self._throttle_data = 1000
+        self._base_throttle_hover = 1000
         self._pid_height.reset()
         self.lock_motors()
 
