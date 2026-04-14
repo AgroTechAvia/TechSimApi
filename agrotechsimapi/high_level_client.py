@@ -60,7 +60,7 @@ class HighLevelSimClient:
     ControlMode = Literal["position", "velocity"]
 
     # ===== НАСТРОЙКИ МАКСИМАЛЬНОЙ СКОРОСТИ И УСКОРЕНИЯ =====
-    _max_velocity = 0.25  # Максимальная скорость (м/с)
+    _max_velocity = 0.2  # Максимальная скорость (м/с)
     _max_acceleration = 0.75 # Максимальное ускорение (м/с²)
     # =======================================================
 
@@ -72,10 +72,10 @@ class HighLevelSimClient:
 
         self.camera_id = 0
 
-        pos_pid_processing = lambda x:  ((2/(1+(2.7**(-x * 4.0)))) - 1) * x
-        self._pid_pos_x = PID(kp=1.55, ki=0.0, kd=1.75, max_control=self._max_velocity,
+        
+        self._pid_pos_x = PID(kp=2.75, ki=0.0, kd=2.4, max_control=self._max_velocity,
                               i_limit=0.1)#, processing_func = pos_pid_processing)
-        self._pid_pos_y = PID(kp=1.55, ki=0.0, kd=1.75, max_control=self._max_velocity,
+        self._pid_pos_y = PID(kp=2.75, ki=0.0, kd=2.4, max_control=self._max_velocity,
                               i_limit=0.05)#, processing_func = pos_pid_processing)
 
         # Скорость → PWM (PD-регулятор, МАКСИМАЛЬНАЯ СТАБИЛЬНОСТЬ)
@@ -84,10 +84,10 @@ class HighLevelSimClient:
         # kd=8.0: МАКСИМАЛЬНОЕ демпфирование для подавления осцилляций
         # max_control=1.0: ОГРАНИЧЕНО — дрон не сможет разогнаться слишком сильно
         #                   PWM диапазон: 1400-1600 (вместо 1300-1700)
-        self._pid_vel_pitch = PID(kp=3.25, ki=0.0, kd=3.25,
-                              max_control=1.5, i_limit=0.005)
-        self._pid_vel_roll = PID(kp=3.25, ki=0.0, kd=3.25,
-                              max_control=1.5, i_limit=0.005)
+        self._pid_vel_pitch = PID(kp=4.0, ki=0.001, kd=3.6,
+                              max_control=1.5, i_limit=0.0033)
+        self._pid_vel_roll = PID(kp=4.0, ki=0.001, kd=3.6,
+                              max_control=1.5, i_limit=0.0033)
 
         # Yaw PID (линейный, т.к. точность важна)
         self._pid_yaw = PID(kp=3.5, ki=0.001, kd=0.4, max_control=1.0, i_limit=None)
@@ -97,8 +97,8 @@ class HighLevelSimClient:
         # kp=2.5: ошибка 1м → delta throttle 250
         # ki=0.017: медленное накопление для точного висения
         # kd=7.0: демпфирование
-        heigh_pid_processing = lambda x: ((2/(1+(2.7**(-x * 3)))) - 1) * 1.55 
-        self._pid_height = PID(kp=5.0, ki=0.125, kd=0.8,
+        heigh_pid_processing = lambda x: ((2/(1+(2.7**(-x * 4)))) - 1) * 1.55 
+        self._pid_height = PID(kp=7.0, ki=0.125, kd=0.6,
                                i_limit=12, processing_func=heigh_pid_processing)
 
         # Базовый throttle для висения (подобран экспериментально для TechSim)
@@ -135,7 +135,7 @@ class HighLevelSimClient:
         # ===== LOW-PASS ФИЛЬТР ДЛЯ СКОРОСТИ =====
         # Коэффициент фильтрации: 0.0 (полное сглаживание) → 1.0 (без фильтрации)
         # Рекомендуемые значения: 0.2-0.4 для баланса между шумом и отзывчивостью
-        self._vel_filter_alpha = 0.55  # Коэффициент экспоненциального сглаживания
+        self._vel_filter_alpha = 0.75  # Коэффициент экспоненциального сглаживания
         self._filtered_vx_world = 0.0  # Отфильтрованная скорость по X
         self._filtered_vy_world = 0.0  # Отфильтрованная скорость по Y
         self._vel_filter_initialized = False
