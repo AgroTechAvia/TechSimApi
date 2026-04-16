@@ -88,24 +88,25 @@ class HighLevelSimClient:
                               max_control=1.5, i_limit=0.0033)
 
         # Yaw PID (внешний контур: позиция → скорость)
-        self._pid_yaw_pos = PID(kp=1, ki=0.0, kd=1.5, max_control=2, i_limit=None)  # max_control = максимальная скорость рад/с
+        #self._pid_yaw_pos = PID(kp=1, ki=0.0, kd=1.5, max_control=2, i_limit=None)  # max_control = максимальная скорость рад/с
 
         # Yaw rate PID (внутренний контур: скорость → PWM)
-        self._pid_yaw_rate = PID(kp=4.7, ki=0.0, kd=2.0, max_control=1.0, i_limit=None)
+        #self._pid_yaw_rate = PID(kp=4.7, ki=0.0, kd=2.0, max_control=1.0, i_limit=None)
 
+        self._pid_yaw = PID(kp=20, ki=0.0, kd=0.4, max_control=1.0, i_limit=None)
         # ===== ПИД-регулятор высоты (ОДИН контур) =====
         # Ошибка высоты → throttle_delta
         # kp=2.5: ошибка 1м → delta throttle 250
         # ki=0.017: медленное накопление для точного висения
         # kd=7.0: демпфирование
-        heigh_pid_processing = lambda x: ((2/(1+(2.7**(-x * 3)))) - 1) * 1.7 
-        self._pid_height = PID(kp=7.5, ki=0.00, kd=5.0,
+        heigh_pid_processing = lambda x: ((2/(1+(2.7**(-x * 4.125)))) - 1) * 1.7 
+        self._pid_height = PID(kp=4.5, ki=0.00, kd=3.5,
                                i_limit=1, processing_func=heigh_pid_processing)
 
         # Базовый throttle для висения (подобран экспериментально для TechSim)
         self._base_throttle_hover = 1000  # 1500 для висения с PosHold
         self._max_throttle = 1675  # Максимум для взлета/маневров
-        self._min_throttle = 1475  # Минимум для безопасности
+        self._min_throttle = 1470  # Минимум для безопасности
 
         # ===== КОЭФФИЦИЕНТЫ НАПРАВЛЕНИЯ (для подстройки под симулятор) =====
         # +1: PWM растет при движении вперед/вправо/по часовой
@@ -284,54 +285,26 @@ class HighLevelSimClient:
     def yaw_callback(self):
         """
         Фоновый коллбэк для управления yaw (25 Гц).
-        Каскадное PID-управление:
-        - position mode: целевой угол → скорость → PWM
-        - velocity mode: целевая скорость → PWM
+        Постоянно регулирует yaw дрона к target_yaw.
         """
         if not self._simulator_alive:
             return
 
         try:
             current_yaw = self._get_yaw_cw()
+            error = self._target_yaw - current_yaw
+            error = self._wrap_pi(error)  # Нормализуем ошибку
+            
+            # Обновляем PID
+            self._pid_yaw.update_control(error)
+            yaw_rate = self._pid_yaw.get_control()
 
-            if self._yaw_mode == "position":
-                # ВНЕШНИЙ КОНТУР: Угол → Скорость
-                error = self._target_yaw - current_yaw
-                error = self._wrap_pi(error)  # Нормализуем ошибку
-
-                # PID позиции выдает целевую скорость (рад/с)
-                self._pid_yaw_pos.update_control(error)
-                yaw_rate_target = self._pid_yaw_pos.get_control()
-            else:
-                # VELOCITY MODE: используем заданную скорость напрямую
-                yaw_rate_target = self._target_yaw_rate
-
-            # ВНУТРЕННИЙ КОНТУР: Скорость → PWM
-            # Вычисляем текущую скорость yaw (конечные разности)
-            if not hasattr(self, '_prev_yaw'):
-                self._prev_yaw = current_yaw
-                self._prev_yaw_time = time.monotonic()
-
-            now = time.monotonic()
-            dt = now - self._prev_yaw_time
-            if dt > 0:
-                current_yaw_rate = self._wrap_pi(current_yaw - self._prev_yaw) / dt
-            else:
-                current_yaw_rate = 0.0
-
-            self._prev_yaw = current_yaw
-            self._prev_yaw_time = now
-
-            # Ошибка скорости
-            yaw_rate_error = yaw_rate_target - current_yaw_rate
-
-            # PID скорости выдает PWM
-            self._pid_yaw_rate.update_control(yaw_rate_error)
-            yaw_pwm = int(vel_to_rc_signal(self._pid_yaw_rate.get_control() * self._yaw_direction))
-
+            # Конвертируем в PWM с учетом направления
+            yaw_pwm = vel_to_rc_signal(yaw_rate * self._yaw_direction)
             # Обновляем только yaw, не трогая roll/pitch
-            r, p, _ = self._rpy_vel_data
-            self._rpy_vel_data = (r, p, yaw_pwm)
+            if self._yaw_mode == "position":
+                r, p, _ = self._rpy_vel_data
+                self._rpy_vel_data = (r, p, yaw_pwm)
 
         except Exception as e:
             logger.warning(f"Error in yaw_callback: {e}")
@@ -490,8 +463,9 @@ class HighLevelSimClient:
             roll_pwm = int(vel_to_rc_signal(roll_control * self._roll_direction))
 
             # Обновляем roll/pitch, не трогая yaw
-            _, _, y = self._rpy_vel_data
-            self._rpy_vel_data = (roll_pwm, pitch_pwm, y)
+            if self._control_mode == "position":
+                _, _, y = self._rpy_vel_data
+                self._rpy_vel_data = (roll_pwm, pitch_pwm, y)
 
         except Exception as e:
             logger.warning(f"Error in velocity_callback: {e}")
@@ -548,8 +522,15 @@ class HighLevelSimClient:
         print(f"\n[control] set velocity xy x:{round(vx,2)} y:{round(vy,2)}")
         self._control_mode = "velocity"
 
+        pitch_pwm = int(vel_to_rc_signal(vx))
+        roll_pwm = int(vel_to_rc_signal(vy))
+
+        # Обновляем roll/pitch, не трогая yaw
+        _, _, y = self._rpy_vel_data
+        self._rpy_vel_data = (roll_pwm, pitch_pwm, y)
+
         # Если скорость задана в мировой СК, преобразуем в СК дрона
-        if frame == "odom":
+        '''if frame == "odom":
             yaw = self._get_yaw_cw()
             cos_yaw = math.cos(yaw)
             sin_yaw = math.sin(yaw)
@@ -566,7 +547,8 @@ class HighLevelSimClient:
         vx_body = max(-self._max_velocity * 2, min(self._max_velocity * 2, vx_body))
         vy_body = max(-self._max_velocity * 2, min(self._max_velocity * 2, vy_body))
 
-        self._target_velocity = (vx_body, vy_body)
+        self._target_velocity = (vx_body, vy_body)'''
+
 
     def set_position_mode(self):
         """Включить режим позиции (внешний контур активен)"""
@@ -587,8 +569,12 @@ class HighLevelSimClient:
         print(f"\n[control] set yaw:{round(yaw_rate,2)}")
         self._yaw_mode = "velocity"
         # Ограничиваем максимальную скорость поворота (например, 1.5 рад/с ≈ 86°/с)
-        max_yaw_rate = 1.5
-        self._target_yaw_rate = max(-max_yaw_rate, min(max_yaw_rate, yaw_rate))
+        '''max_yaw_rate = 1.5
+        self._target_yaw_rate = max(-max_yaw_rate, min(max_yaw_rate, yaw_rate))'''
+        yaw_pwm = int(vel_to_rc_signal(yaw_rate))
+            # Обновляем только yaw, не трогая roll/pitch
+        r, p, _ = self._rpy_vel_data
+        self._rpy_vel_data = (r, p, yaw_pwm)
 
     def set_yaw_position_mode(self):
         """Включить режим позиции для yaw (внешний контур активен, используется _target_yaw)"""
@@ -754,10 +740,12 @@ class HighLevelSimClient:
         self._pid_vel_roll.reset()'''
 
         # 2. Включаем режим позиции
-        print(f"\n[control] go to xy x:{round(x,2)} y:{round(y,2)}")
+        
 
         self._control_mode = "position"
-
+        if self._yaw_mode == "velocity":
+            self._yaw_mode = "position"
+            self._target_yaw = self._wrap_pi(0)
         # 3. Вычисляем целевую позицию
         kin = self.get_sim_kinematics()
         if kin is None:
@@ -774,6 +762,8 @@ class HighLevelSimClient:
                 self._target_position = (x0 + x, y0 + y)
             else:
                 self._target_position = (x, y)
+
+            print(f"\n[control] go to xy [odom] x:{round(self._target_position[0],2)} y:{round(self._target_position[1],2)}")
         elif frame == "base_link":
             # Преобразуем из СК дрона в мировую СК
             # Согласно конвенции yaw:
@@ -790,6 +780,8 @@ class HighLevelSimClient:
             target_x_world = cx + x * cos_yaw + y * sin_yaw
             target_y_world = cy - x * sin_yaw + y * cos_yaw
             self._target_position = (target_x_world, target_y_world)
+
+            print(f"\n[control] go to xy [local] x:{round(x,2)} y:{round(y,2)}| [world] x:{round(self._target_position[0],2)} y:{round(self._target_position[1],2)}")
         else:
             raise ValueError("frame must be 'odom' or 'base_link'")
 
@@ -825,7 +817,7 @@ class HighLevelSimClient:
             tx, ty = self._target_position
             dist = math.hypot(tx - cx, ty - cy)
             velocity = math.hypot(abs(self._prev_x), abs(self._prev_y))/50
-            if dist < 0.1 and velocity < 0.03:  # 5 см допуск
+            if dist < 0.15 and velocity < 0.1:  # 5 см допуск
                 logger.info(f"Reached target: {x}, {y}")
                 print(f"[control] go to xy succeed x:{round(cx,2)} y:{round(cy,2)} velocity:{round(velocity,2)}")
                 return True
@@ -885,8 +877,8 @@ class HighLevelSimClient:
         self._yaw_mode = "position"
 
         # Сброс PID
-        self._pid_yaw_pos.reset()
-        self._pid_yaw_rate.reset()
+        #self._pid_yaw_pos.reset()
+        #self._pid_yaw_rate.reset()
 
         # Нормализуем цель
         goal = self._wrap_pi(yaw)
@@ -974,13 +966,15 @@ class HighLevelSimClient:
         
     def getUltrasonicById(self, sonic_id: int):
         with self._client_lock:
-            return self._client.get_range_data(
+            sonic_data = self._client.get_range_data(
                                             rangefinder_id=sonic_id,
                                             range_min=0.15,
                                             range_max=4,
                                             is_clear=True,
                                             range_error=0.0003
                                             ) 
+            print(f"[control] ultrasinc: {round(sonic_data,3)}")
+            return sonic_data
 
     def getRPY(self):
         kin = self.get_sim_kinematics()
@@ -1030,9 +1024,10 @@ class HighLevelSimClient:
 
         PERIOD = 0.05
         MIN_H = 0.00
-        TAKEOFF_H = 1.05
+        TAKEOFF_H = 1.0
+        Z_BIAS = 0.075
         MAX_H = 5.00
-        REACH_COEF = 0.93
+        REACH_COEF = 0.95
         TIMEOUT_COEF = 10.0
 
         # Если дрон в режиме velocity, переключаемся в position и фиксируем текущую позицию
@@ -1048,7 +1043,7 @@ class HighLevelSimClient:
         h_now = self._get_height()
         tgt = self._clamp_h(TAKEOFF_H, MIN_H, MAX_H)
 
-        self.set_target_height(tgt)
+        self.set_target_height(tgt + Z_BIAS)
 
         climb = max(0.0, tgt - h_now)
         deadline = time.monotonic() + (TIMEOUT_COEF * climb if climb > 0.0 else TIMEOUT_COEF)
@@ -1127,8 +1122,9 @@ class HighLevelSimClient:
         PERIOD = 0.05
         MIN_H = 0.00
         MAX_H = 5.00
-        STEP = 0.005
-        REACH_COEF = 0.93
+        STEP = 0.05
+        Z_BIAS = 0.075
+        REACH_COEF = 0.95
         TIMEOUT_MIN = 15.0
         TIMEOUT_COEF = 10.0
 
@@ -1148,7 +1144,7 @@ class HighLevelSimClient:
         h0 = self._get_height()
 
         if tgt >= h0:
-            self.set_target_height(tgt)
+            self.set_target_height(tgt + Z_BIAS)
             deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * max(0.0, tgt - h0)
             while True:
                 if self._is_abort:
@@ -1518,6 +1514,7 @@ class HighLevelSimClient:
                 self._blob_img = resolution_changes(blob_img, (640, 480))
     
     def setDiod(self,diod_id, r, g, b):
+        print(f"\n[control] set diod {diod_id} to ({r},{g},{b})")
         with self._client_lock:
             self._client.set_Diod(diod_id, float(r), float(g), float(b))
 
