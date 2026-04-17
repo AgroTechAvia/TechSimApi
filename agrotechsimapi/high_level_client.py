@@ -973,7 +973,8 @@ class HighLevelSimClient:
                                             is_clear=True,
                                             range_error=0.0003
                                             ) 
-            print(f"[control] ultrasinc: {round(sonic_data,3)}")
+            sonic_data = round((sonic_data * 100),3)
+            print(f"[control] ultrasinc: {sonic_data}")
             return sonic_data
 
     def getRPY(self):
