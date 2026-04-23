@@ -1,198 +1,198 @@
 ﻿# AgroTechSim API
 
 ![AgroTechSim API](https://raw.githubusercontent.com/AgroTechAvia/TechSimApi/main/img/header.png)
-[Р СѓСЃСЃРєРёР№](#СЂСѓСЃСЃРєРёР№) | [English](#english)
+[Русский](#русский) | [English](#english)
 
 ---
 
-## Р СѓСЃСЃРєРёР№
+## Русский
 
-### рџљЂ РћРїРёСЃР°РЅРёРµ
+### 🚀 Описание
 
-**AgroTechSim API** вЂ” СЌС‚Рѕ Python-Р±РёР±Р»РёРѕС‚РµРєР° РґР»СЏ СЂР°Р±РѕС‚С‹ СЃ СЃРёРјСѓР»СЏС‚РѕСЂРѕРј AgroTechSim, РїСЂРµРґРЅР°Р·РЅР°С‡РµРЅРЅР°СЏ РґР»СЏ РїРѕР»СѓС‡РµРЅРёСЏ С‚РµР»РµРјРµС‚СЂРёРё СЃ РґСЂРѕРЅРѕРІ, РѕР±СЂР°Р±РѕС‚РєРё СЃРµРЅСЃРѕСЂРЅС‹С… РґР°РЅРЅС‹С… Рё СЂРµР°Р»РёР·Р°С†РёРё СЃРёСЃС‚РµРј Р°РІС‚РѕРЅРѕРјРЅРѕРіРѕ СѓРїСЂР°РІР»РµРЅРёСЏ. Р‘РёР±Р»РёРѕС‚РµРєР° РїСЂРµРґРѕСЃС‚Р°РІР»СЏРµС‚ РєР°Рє РЅРёР·РєРѕСѓСЂРѕРІРЅРµРІС‹Р№ РґРѕСЃС‚СѓРї Рє СЃС‹СЂС‹Рј РґР°РЅРЅС‹Рј СЃРµРЅСЃРѕСЂРѕРІ, С‚Р°Рє Рё РІС‹СЃРѕРєРѕСѓСЂРѕРІРЅРµРІС‹Рµ Р°Р±СЃС‚СЂР°РєС†РёРё РґР»СЏ СѓРїСЂРѕС‰С‘РЅРЅРѕРіРѕ СѓРїСЂР°РІР»РµРЅРёСЏ РґСЂРѕРЅРѕРј.
+**AgroTechSim API** — это Python-библиотека для работы с симулятором AgroTechSim, предназначенная для получения телеметрии с дронов, обработки сенсорных данных и реализации систем автономного управления. Библиотека предоставляет как низкоуровневый доступ к сырым данным сенсоров, так и высокоуровневые абстракции для упрощённого управления дроном.
 
-РњРѕРґСѓР»СЊ РїРѕР·РІРѕР»СЏРµС‚ СЂР°Р·СЂР°Р±РѕС‚С‡РёРєР°Рј СЃРѕР·РґР°РІР°С‚СЊ СЃР»РѕР¶РЅС‹Рµ Р°Р»РіРѕСЂРёС‚РјС‹ РєРѕРјРїСЊСЋС‚РµСЂРЅРѕРіРѕ Р·СЂРµРЅРёСЏ, РЅР°РІРёРіР°С†РёРё Рё СѓРїСЂР°РІР»РµРЅРёСЏ Р±РµР· РЅРµРѕР±С…РѕРґРёРјРѕСЃС‚Рё СЂР°Р±РѕС‚С‹ СЃ СЂРµР°Р»СЊРЅС‹Рј РѕР±РѕСЂСѓРґРѕРІР°РЅРёРµРј, РёСЃРїРѕР»СЊР·СѓСЏ РїРѕР»РЅРѕС„СѓРЅРєС†РёРѕРЅР°Р»СЊРЅС‹Р№ СЃРёРјСѓР»СЏС‚РѕСЂ РґСЂРѕРЅРѕРІ.
+Модуль позволяет разработчикам создавать сложные алгоритмы компьютерного зрения, навигации и управления без необходимости работы с реальным оборудованием, используя полнофункциональный симулятор дронов.
 
-### рџ“Љ РЎРѕРІРјРµСЃС‚РёРјРѕСЃС‚СЊ
+### 📊 Совместимость
 
-| РљРѕРјРїРѕРЅРµРЅС‚ | Р’РµСЂСЃРёСЏ | РЎС‚Р°С‚СѓСЃ |
+| Компонент | Версия | Статус |
 |-----------|--------|--------|
 | **AgroTechSim API** | 1.0.1-v1.0.2 | ✅ Compatible with AgroTechSim 1.0.3 |
 | **AgroTechSim API** | 1.0.3 | ✅ Compatible with AgroTechSim 1.0.4-1.0.5 |
 | **Python** | 3.10 | ✅ Recommended |
 | **InavMSPApi** | 1.1.0 | ✅ Dependency |
 
-### вљЎ РЈСЃС‚Р°РЅРѕРІРєР°
+### ⚡ Установка
 
-#### Р’Р°СЂРёР°РЅС‚ 1: РЈСЃС‚Р°РЅРѕРІРєР° РёР· PyPi (СЂРµРєРѕРјРµРЅРґСѓРµС‚СЃСЏ)
+#### Вариант 1: Установка из PyPi (рекомендуется)
 
 ```bash
 pip install agrotechsimapi
 ```
 
-Р­С‚РѕС‚ СЃРїРѕСЃРѕР± Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СѓСЃС‚Р°РЅРѕРІРёС‚ РІСЃРµ Р·Р°РІРёСЃРёРјРѕСЃС‚Рё, РІРєР»СЋС‡Р°СЏ `inavmspapi` С‚СЂРµР±СѓРµРјРѕР№ РІРµСЂСЃРёРё.
+Этот способ автоматически установит все зависимости, включая `inavmspapi` требуемой версии.
 
-#### Р’Р°СЂРёР°РЅС‚ 2: РЈСЃС‚Р°РЅРѕРІРєР° РёР· РёСЃС…РѕРґРЅРёРєРѕРІ
+#### Вариант 2: Установка из исходников
 
-1. РљР»РѕРЅРёСЂСѓР№С‚Рµ СЂРµРїРѕР·РёС‚РѕСЂРёР№:
+1. Клонируйте репозиторий:
 ```bash
 git clone https://github.com/AgroTechAvia/TechSimApi.git
 cd TechSimApi
 ```
 
-2. Р—Р°РїСѓСЃС‚РёС‚Рµ СЃРєСЂРёРїС‚ СѓСЃС‚Р°РЅРѕРІРєРё:
+2. Запустите скрипт установки:
 ```bash
 python setup_by_source.py
 ```
 
-РЎРєСЂРёРїС‚ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СѓСЃС‚Р°РЅРѕРІРёС‚ РІСЃРµ Р·Р°РІРёСЃРёРјРѕСЃС‚Рё Рё РЅР°СЃС‚СЂРѕРёС‚ РѕРєСЂСѓР¶РµРЅРёРµ.
+Скрипт автоматически установит все зависимости и настроит окружение.
 
-#### Р’Р°СЂРёР°РЅС‚ 3: Р СѓС‡РЅР°СЏ СѓСЃС‚Р°РЅРѕРІРєР° (РґР»СЏ СЂР°Р·СЂР°Р±РѕС‚С‡РёРєРѕРІ)
+#### Вариант 3: Ручная установка (для разработчиков)
 
 ```bash
-# 1. РЎРѕР·РґР°Р№С‚Рµ РІРёСЂС‚СѓР°Р»СЊРЅРѕРµ РѕРєСЂСѓР¶РµРЅРёРµ
+# 1. Создайте виртуальное окружение
 python -m venv .venv
 
-# 2. РђРєС‚РёРІРёСЂСѓР№С‚Рµ РѕРєСЂСѓР¶РµРЅРёРµ
+# 2. Активируйте окружение
 # Windows:
 .venv\Scripts\activate
 # Linux/Mac:
 source .venv/bin/activate
 
-# 3. РЈСЃС‚Р°РЅРѕРІРёС‚Рµ inavmspapi
+# 3. Установите inavmspapi
 git clone https://github.com/AgroTechAvia/InavMSPApi.git
 cd InavMSPApi
 git checkout v1.1.0
 pip install .
 
-# 4. РЈСЃС‚Р°РЅРѕРІРёС‚Рµ agrotechsimapi
+# 4. Установите agrotechsimapi
 cd ..
 git clone https://github.com/AgroTechAvia/TechSimApi.git
 cd TechSimApi
 pip install .
 ```
 
-### рџЋЇ Р¤СѓРЅРєС†РёРѕРЅР°Р»
+### 🎯 Функционал
 
-#### РќРёР·РєРѕСѓСЂРѕРІРЅРµРІС‹Р№ API (`SimClient`)
-- рџ“· **РљР°РјРµСЂС‹**: РџРѕР»СѓС‡РµРЅРёРµ С†РІРµС‚РЅС‹С…, С‚РµРїР»РѕРІРёР·РёРѕРЅРЅС‹С…, РіР»СѓР±РёРЅРЅС‹С… Рё СЃРїРµРєС‚СЂР°Р»СЊРЅС‹С… РёР·РѕР±СЂР°Р¶РµРЅРёР№
-- рџ“Ў **Р›РёРґР°СЂ**: 360В° СЃРєР°РЅРёСЂРѕРІР°РЅРёРµ РѕРєСЂСѓР¶РµРЅРёСЏ СЃ РЅР°СЃС‚СЂР°РёРІР°РµРјС‹РјРё РїР°СЂР°РјРµС‚СЂР°РјРё
-- рџЋЇ **Р Р°РґР°СЂ**: РћР±РЅР°СЂСѓР¶РµРЅРёРµ Р±Р»РёР¶Р°Р№С€РёС… РѕР±СЉРµРєС‚РѕРІ СЃ СѓРіР»РѕРІС‹РјРё РєРѕРѕСЂРґРёРЅР°С‚Р°РјРё
-- рџ“Џ **Р”Р°Р»СЊРЅРѕРјРµСЂ**: РўРѕС‡РµС‡РЅРѕРµ РёР·РјРµСЂРµРЅРёРµ СЂР°СЃСЃС‚РѕСЏРЅРёСЏ
-- рџ’Ў **LED СѓРїСЂР°РІР»РµРЅРёРµ**: РљРѕРЅС‚СЂРѕР»СЊ РїРѕРґСЃРІРµС‚РєРё РґСЂРѕРЅР°
-- рџ“Љ **РљРёРЅРµРјР°С‚РёРєР°**: РџРѕР»СѓС‡РµРЅРёРµ РїРѕР·РёС†РёРё, РѕСЂРёРµРЅС‚Р°С†РёРё Рё СЃРєРѕСЂРѕСЃС‚Рё РґСЂРѕРЅР°
+#### Низкоуровневый API (`SimClient`)
+- 📷 **Камеры**: Получение цветных, тепловизионных, глубинных и спектральных изображений
+- 📡 **Лидар**: 360° сканирование окружения с настраиваемыми параметрами
+- 🎯 **Радар**: Обнаружение ближайших объектов с угловыми координатами
+- 📏 **Дальномер**: Точечное измерение расстояния
+- 💡 **LED управление**: Контроль подсветки дрона
+- 📊 **Кинематика**: Получение позиции, ориентации и скорости дрона
 
-#### Р’С‹СЃРѕРєРѕСѓСЂРѕРІРЅРµРІС‹Р№ API (`HighLevelSimClient`)
-- рџљЃ **РЈРїСЂР°РІР»РµРЅРёРµ РїРѕР»С‘С‚РѕРј**: Р’Р·Р»С‘С‚, РїРѕСЃР°РґРєР°, СѓРґРµСЂР¶Р°РЅРёРµ РІС‹СЃРѕС‚С‹
-- рџ§­ **РќР°РІРёРіР°С†РёСЏ**: Р”РІРёР¶РµРЅРёРµ Рє РєРѕРѕСЂРґРёРЅР°С‚Р°Рј РІ СЂР°Р·РЅС‹С… СЃРёСЃС‚РµРјР°С… РѕС‚СЃС‡С‘С‚Р°
-- рџЋЇ **РЎС‚Р°Р±РёР»РёР·Р°С†РёСЏ**: PID-СЂРµРіСѓР»СЏС‚РѕСЂС‹ РґР»СЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРѕРіРѕ СѓРґРµСЂР¶Р°РЅРёСЏ РїРѕР·РёС†РёРё
-- рџ‘ЃпёЏ **РћР±СЂР°Р±РѕС‚РєР° РёР·РѕР±СЂР°Р¶РµРЅРёР№**: Р”РµС‚РµРєС‚РёСЂРѕРІР°РЅРёРµ ArUco РјР°СЂРєРµСЂРѕРІ Рё blob-РѕР±СЉРµРєС‚РѕРІ
-- рџ”„ **РћРґРѕРјРµС‚СЂРёСЏ**: РћС‚СЃР»РµР¶РёРІР°РЅРёРµ РїРµСЂРµРјРµС‰РµРЅРёСЏ РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ РЅР°С‡Р°Р»СЊРЅРѕР№ С‚РѕС‡РєРё
+#### Высокоуровневый API (`HighLevelSimClient`)
+- 🚁 **Управление полётом**: Взлёт, посадка, удержание высоты
+- 🧭 **Навигация**: Движение к координатам в разных системах отсчёта
+- 🎯 **Стабилизация**: PID-регуляторы для автоматического удержания позиции
+- 👁️ **Обработка изображений**: Детектирование ArUco маркеров и blob-объектов
+- 🔄 **Одометрия**: Отслеживание перемещения относительно начальной точки
 - **Обновление автономного полета**: Для большинства дронов добавлены готовые пресеты PID в [`agrotechsimapi/utils/drone_setups.py`](agrotechsimapi/utils/drone_setups.py), при этом все регуляторы можно настраивать вручную. Пример: [`examples_high_level/simple_flight/pid_waypoints_flight.py`](examples_high_level/simple_flight/pid_waypoints_flight.py).
 
-### рџ“Ѓ РџСЂРёРјРµСЂС‹ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ
+### 📁 Примеры использования
 
-Р’ СЂРµРїРѕР·РёС‚РѕСЂРёРё РїСЂРµРґСЃС‚Р°РІР»РµРЅС‹ РіРѕС‚РѕРІС‹Рµ РїСЂРёРјРµСЂС‹:
+В репозитории представлены готовые примеры:
 
-#### `examples_low_level/` - РќРёР·РєРѕСѓСЂРѕРІРЅРµРІС‹Рµ РїСЂРёРјРµСЂС‹
+#### `examples_low_level/` - Низкоуровневые примеры
 
-#### `examples_high_level/` - Р’С‹СЃРѕРєРѕСѓСЂРѕРІРЅРµРІС‹Рµ РїСЂРёРјРµСЂС‹
+#### `examples_high_level/` - Высокоуровневые примеры
 
 
-### рџљЂ Р‘С‹СЃС‚СЂС‹Р№ СЃС‚Р°СЂС‚
+### 🚀 Быстрый старт
 
 ```python
 from agrotechsimapi import SimClient, CaptureType
 import cv2
 
-# РџРѕРґРєР»СЋС‡РµРЅРёРµ Рє СЃРёРјСѓР»СЏС‚РѕСЂСѓ
+# Подключение к симулятору
 client = SimClient(address="127.0.0.1", port=8080)
 
-# РџРѕР»СѓС‡РµРЅРёРµ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ СЃ РєР°РјРµСЂС‹
+# Получение изображения с камеры
 image = client.get_camera_capture(camera_id=0, type=CaptureType.color)
 
-# РћС‚РѕР±СЂР°Р¶РµРЅРёРµ РёР·РѕР±СЂР°Р¶РµРЅРёСЏ
+# Отображение изображения
 cv2.imshow("Drone Camera", image)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
 ```
 
-### рџ§Є РўРµСЃС‚РёСЂРѕРІР°РЅРёРµ СЂР°Р±РѕС‚РѕСЃРїРѕСЃРѕР±РЅРѕСЃС‚Рё
+### 🧪 Тестирование работоспособности
 
-Р”Р»СЏ РїСЂРѕРІРµСЂРєРё РєРѕСЂСЂРµРєС‚РЅРѕР№ СЂР°Р±РѕС‚С‹ РјРѕРґСѓР»СЏ СЃ СЃРёРјСѓР»СЏС‚РѕСЂРѕРј РёСЃРїРѕР»СЊР·СѓР№С‚Рµ РёРЅС‚РµРіСЂР°С†РёРѕРЅРЅС‹Рµ С‚РµСЃС‚С‹. Р¤Р°Р№Р» `test_sim_client_real.py` СЃРѕРґРµСЂР¶РёС‚ С‚РµСЃС‚С‹, РєРѕС‚РѕСЂС‹Рµ РїСЂРѕРІРµСЂСЏСЋС‚ РїРѕРґРєР»СЋС‡РµРЅРёРµ Рє СЃРёРјСѓР»СЏС‚РѕСЂСѓ Рё СЂР°Р±РѕС‚Сѓ РІСЃРµС… РѕСЃРЅРѕРІРЅС‹С… С„СѓРЅРєС†РёР№.
+Для проверки корректной работы модуля с симулятором используйте интеграционные тесты. Файл `test_sim_client_real.py` содержит тесты, которые проверяют подключение к симулятору и работу всех основных функций.
 
-#### рџ“‹ РџСЂРµРґРІР°СЂРёС‚РµР»СЊРЅС‹Рµ С‚СЂРµР±РѕРІР°РЅРёСЏ:
-1. **Р—Р°РїСѓС‰РµРЅРЅС‹Р№ СЃРёРјСѓР»СЏС‚РѕСЂ AgroTechSim**
-2. **Р”СЂРѕРЅ РїРѕСЏРІРёР»СЃСЏ** РІ СЃРёРјСѓР»СЏС‚РѕСЂРµ
-3. **РЈСЃС‚Р°РЅРѕРІР»РµРЅ Python 3.10+** Рё РЅРµРѕР±С…РѕРґРёРјС‹Рµ Р·Р°РІРёСЃРёРјРѕСЃС‚Рё
+#### 📋 Предварительные требования:
+1. **Запущенный симулятор AgroTechSim**
+2. **Дрон появился** в симуляторе
+3. **Установлен Python 3.10+** и необходимые зависимости
 
-#### рџљЂ Р—Р°РїСѓСЃРє С‚РµСЃС‚РѕРІ:
+#### 🚀 Запуск тестов:
 
 ```bash
-# РџРµСЂРµР№РґРёС‚Рµ РІ РґРёСЂРµРєС‚РѕСЂРёСЋ РїСЂРѕРµРєС‚Р°
+# Перейдите в директорию проекта
 cd TechSimApi
 
-# Р—Р°РїСѓСЃС‚РёС‚Рµ С‚РµСЃС‚С‹ СЃ СЃРёРјСѓР»СЏС‚РѕСЂРѕРј
+# Запустите тесты с симулятором
 pytest test/test_sim_client_real.py --with-simulator -v
 ```
 
-#### рџ“Љ Р§С‚Рѕ РїСЂРѕРІРµСЂСЏСЋС‚ С‚РµСЃС‚С‹:
+#### 📊 Что проверяют тесты:
 
-РўРµСЃС‚ `test_sim_client_real.py` РїРѕСЃР»РµРґРѕРІР°С‚РµР»СЊРЅРѕ РїСЂРѕРІРµСЂСЏРµС‚:
+Тест `test_sim_client_real.py` последовательно проверяет:
 
-1. **вњ… РџРѕРґРєР»СЋС‡РµРЅРёРµ Рє СЃРёРјСѓР»СЏС‚РѕСЂСѓ** - РїСЂРѕРІРµСЂРєР° СЃРѕРµРґРёРЅРµРЅРёСЏ
-2. **вњ… РџРѕР»СѓС‡РµРЅРёРµ РёР·РѕР±СЂР°Р¶РµРЅРёР№ СЃ РєР°РјРµСЂ** - С†РІРµС‚РЅР°СЏ, С‚РµРїР»РѕРІРёР·РёРѕРЅРЅР°СЏ, РіР»СѓР±РёРЅРЅР°СЏ РєР°РјРµСЂС‹
-3. **вњ… РљРёРЅРµРјР°С‚РёС‡РµСЃРєРёРµ РґР°РЅРЅС‹Рµ** - РїРѕР·РёС†РёСЏ Рё РѕСЂРёРµРЅС‚Р°С†РёСЏ РґСЂРѕРЅР°
-4. **вњ… Р”Р°РЅРЅС‹Рµ РґР°Р»СЊРЅРѕРјРµСЂР°** - РёР·РјРµСЂРµРЅРёРµ СЂР°СЃСЃС‚РѕСЏРЅРёСЏ
-5. **вњ… РЎРєР°РЅРёСЂРѕРІР°РЅРёРµ Р»РёРґР°СЂРѕРј** - 360В° СЃРєР°РЅРёСЂРѕРІР°РЅРёРµ РѕРєСЂСѓР¶РµРЅРёСЏ
-6. **вњ… Р Р°РґР°СЂ** - РѕР±РЅР°СЂСѓР¶РµРЅРёРµ Р±Р»РёР¶Р°Р№С€РёС… РѕР±СЉРµРєС‚РѕРІ
-7. **вњ… РЈРїСЂР°РІР»РµРЅРёРµ LED** - РІРєР»СЋС‡РµРЅРёРµ/РІС‹РєР»СЋС‡РµРЅРёРµ РїРѕРґСЃРІРµС‚РєРё
-8. **вњ… РћР±СЂР°Р±РѕС‚РєР° РёР·РѕР±СЂР°Р¶РµРЅРёР№** - РґРѕР±Р°РІР»РµРЅРёРµ С€СѓРјР° Рё Р°СЂС‚РµС„Р°РєС‚РѕРІ
-9. **вњ… РќРµСЃРєРѕР»СЊРєРѕ РєР°РјРµСЂ** - СЂР°Р±РѕС‚Р° СЃ СЂР°Р·РЅС‹РјРё ID РєР°РјРµСЂ
-10. **вњ… РћР±СЂР°Р±РѕС‚РєР° РѕС€РёР±РѕРє** - РєРѕСЂСЂРµРєС‚РЅР°СЏ СЂРµР°РєС†РёСЏ РЅР° РЅРµРІР°Р»РёРґРЅС‹Рµ РїР°СЂР°РјРµС‚СЂС‹
-11. **вњ… РџСЂРѕРёР·РІРѕРґРёС‚РµР»СЊРЅРѕСЃС‚СЊ** - РІСЂРµРјСЏ РѕС‚РєР»РёРєР° РѕСЃРЅРѕРІРЅС‹С… С„СѓРЅРєС†РёР№
+1. **✅ Подключение к симулятору** - проверка соединения
+2. **✅ Получение изображений с камер** - цветная, тепловизионная, глубинная камеры
+3. **✅ Кинематические данные** - позиция и ориентация дрона
+4. **✅ Данные дальномера** - измерение расстояния
+5. **✅ Сканирование лидаром** - 360° сканирование окружения
+6. **✅ Радар** - обнаружение ближайших объектов
+7. **✅ Управление LED** - включение/выключение подсветки
+8. **✅ Обработка изображений** - добавление шума и артефактов
+9. **✅ Несколько камер** - работа с разными ID камер
+10. **✅ Обработка ошибок** - корректная реакция на невалидные параметры
+11. **✅ Производительность** - время отклика основных функций
 
-#### вљ пёЏ Р’Р°Р¶РЅС‹Рµ Р·Р°РјРµС‡Р°РЅРёСЏ РїРѕ С‚РµСЃС‚РёСЂРѕРІР°РЅРёСЋ:
+#### ⚠️ Важные замечания по тестированию:
 
-- **РЎРёРјСѓР»СЏС‚РѕСЂ РґРѕР»Р¶РµРЅ Р±С‹С‚СЊ Р·Р°РїСѓС‰РµРЅ** РїРµСЂРµРґ Р·Р°РїСѓСЃРєРѕРј С‚РµСЃС‚РѕРІ
-- **РўРµСЃС‚С‹ РјРѕРіСѓС‚ РїСЂРѕРїСѓСЃРєР°С‚СЊСЃСЏ**, РµСЃР»Рё РѕРїСЂРµРґРµР»РµРЅРЅС‹Р№ СЃРµРЅСЃРѕСЂ РЅРµ РґРѕСЃС‚СѓРїРµРЅ РІ С‚РµРєСѓС‰РµР№ РєРѕРЅС„РёРіСѓСЂР°С†РёРё СЃРёРјСѓР»СЏС‚РѕСЂР°
-- **РџРµСЂРІС‹Рµ РёР·РјРµСЂРµРЅРёСЏ Р»РёРґР°СЂР° Рё СЂР°РґР°СЂР°** РјРѕРіСѓС‚ Р±С‹С‚СЊ РЅРµРєРѕСЂСЂРµРєС‚РЅС‹РјРё (РѕСЃРѕР±РµРЅРЅРѕСЃС‚СЊ СЃРёРјСѓР»СЏС‚РѕСЂР°)
-- **Р”Р»СЏ СЂСѓС‡РЅРѕР№ РїСЂРѕРІРµСЂРєРё** РјРѕР¶РЅРѕ РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊ СЃРєСЂРёРїС‚:
+- **Симулятор должен быть запущен** перед запуском тестов
+- **Тесты могут пропускаться**, если определенный сенсор не доступен в текущей конфигурации симулятора
+- **Первые измерения лидара и радара** могут быть некорректными (особенность симулятора)
+- **Для ручной проверки** можно использовать скрипт:
 
 
-#### рџ”§ РџСЂРёРјРµСЂ РІС‹РІРѕРґР° СѓСЃРїРµС€РЅРѕРіРѕ С‚РµСЃС‚РёСЂРѕРІР°РЅРёСЏ:
+#### 🔧 Пример вывода успешного тестирования:
 
 ```
 ============================================================
 Running SimClient Integration Tests with Real Simulator
 ============================================================
 
-test_connection: вњ“ PASSED
-test_get_camera_capture: вњ“ PASSED  
-test_get_kinematics_data: вњ“ PASSED
-test_get_range_data: вњ“ PASSED
-test_get_laser_scan: вњ“ PASSED
-test_get_radar_point: вљ  SKIPPED (Radar not available)
-test_led_control: вњ“ PASSED
-test_image_processing_methods: вњ“ PASSED
-test_multiple_camera_ids: вњ“ PASSED
-test_call_event_action: вњ“ PASSED
-test_error_handling: вњ“ PASSED
-test_performance: вњ“ PASSED
+test_connection: ✓ PASSED
+test_get_camera_capture: ✓ PASSED  
+test_get_kinematics_data: ✓ PASSED
+test_get_range_data: ✓ PASSED
+test_get_laser_scan: ✓ PASSED
+test_get_radar_point: ⚠ SKIPPED (Radar not available)
+test_led_control: ✓ PASSED
+test_image_processing_methods: ✓ PASSED
+test_multiple_camera_ids: ✓ PASSED
+test_call_event_action: ✓ PASSED
+test_error_handling: ✓ PASSED
+test_performance: ✓ PASSED
 
-вњ… Р’СЃРµ РѕСЃРЅРѕРІРЅС‹Рµ С„СѓРЅРєС†РёРё СЂР°Р±РѕС‚Р°СЋС‚ РєРѕСЂСЂРµРєС‚РЅРѕ!
+✅ Все основные функции работают корректно!
 ```
 
-#### рџђ› Р•СЃР»Рё С‚РµСЃС‚С‹ РЅРµ РїСЂРѕС…РѕРґСЏС‚:
+#### 🐛 Если тесты не проходят:
 
-1. **РџСЂРѕРІРµСЂСЊС‚Рµ РїРѕРґРєР»СЋС‡РµРЅРёРµ Рє СЃРёРјСѓР»СЏС‚РѕСЂСѓ:**
+1. **Проверьте подключение к симулятору:**
 ```python
 from agrotechsimapi import SimClient
 client = SimClient()
 print(f"Connected: {client.is_connected()}")
 ```
 
-2. **РЈР±РµРґРёС‚РµСЃСЊ, С‡С‚Рѕ РїРѕСЂС‚ 8080 РѕС‚РєСЂС‹С‚:**
+2. **Убедитесь, что порт 8080 открыт:**
 ```bash
 # Linux/Mac
 nc -z localhost 8080
@@ -200,21 +200,21 @@ nc -z localhost 8080
 Test-NetConnection -ComputerName localhost -Port 8080
 ```
 
-3. **РџСЂРѕРІРµСЂСЊС‚Рµ, С‡С‚Рѕ РґСЂРѕРЅ Р·Р°СЃРїР°РІРЅРµРЅ РІ СЃРёРјСѓР»СЏС‚РѕСЂРµ**
+3. **Проверьте, что дрон заспавнен в симуляторе**
 
-РўРµСЃС‚РёСЂРѕРІР°РЅРёРµ РїРѕР·РІРѕР»СЏРµС‚ СѓР±РµРґРёС‚СЊСЃСЏ, С‡С‚Рѕ РІСЃРµ РєРѕРјРїРѕРЅРµРЅС‚С‹ РјРѕРґСѓР»СЏ СЂР°Р±РѕС‚Р°СЋС‚ РєРѕСЂСЂРµРєС‚РЅРѕ СЃ С‚РµРєСѓС‰РµР№ РІРµСЂСЃРёРµР№ СЃРёРјСѓР»СЏС‚РѕСЂР°.
+Тестирование позволяет убедиться, что все компоненты модуля работают корректно с текущей версией симулятора.
 
 ---
 
 ## English
 
-### рџљЂ Description
+### 🚀 Description
 
 **AgroTechSim API** is a Python library for working with the AgroTechSim simulator, designed for obtaining drone telemetry, processing sensor data, and implementing autonomous control systems. The library provides both low-level access to raw sensor data and high-level abstractions for simplified drone control.
 
 The module enables developers to create complex computer vision, navigation, and control algorithms without the need for real hardware, using a full-featured drone simulator.
 
-### рџ“Љ Compatibility
+### 📊 Compatibility
 
 | Component | Version | Status |
 |-----------|---------|--------|
@@ -223,7 +223,7 @@ The module enables developers to create complex computer vision, navigation, and
 | **Python** | 3.10 | ✅ Recommended |
 | **InavMSPApi** | 1.1.0 | ✅ Dependency |
 
-### вљЎ Installation
+### ⚡ Installation
 
 #### Option 1: Install from PyPi (recommended)
 
@@ -273,25 +273,25 @@ cd TechSimApi
 pip install .
 ```
 
-### рџЋЇ Features
+### 🎯 Features
 
 #### Low-Level API (`SimClient`)
-- рџ“· **Cameras**: Capture color, thermal, depth, and spectral images
-- рџ“Ў **Lidar**: 360В° environment scanning with configurable parameters
-- рџЋЇ **Radar**: Nearest object detection with angular coordinates
-- рџ“Џ **Rangefinder**: Point distance measurement
-- рџ’Ў **LED Control**: Drone lighting control
-- рџ“Љ **Kinematics**: Get drone position, orientation, and velocity
+- 📷 **Cameras**: Capture color, thermal, depth, and spectral images
+- 📡 **Lidar**: 360° environment scanning with configurable parameters
+- 🎯 **Radar**: Nearest object detection with angular coordinates
+- 📏 **Rangefinder**: Point distance measurement
+- 💡 **LED Control**: Drone lighting control
+- 📊 **Kinematics**: Get drone position, orientation, and velocity
 
 #### High-Level API (`HighLevelSimClient`)
-- рџљЃ **Flight Control**: Takeoff, landing, altitude hold
-- рџ§­ **Navigation**: Movement to coordinates in different reference frames
-- рџЋЇ **Stabilization**: PID controllers for automatic position hold
-- рџ‘ЃпёЏ **Image Processing**: ArUco marker and blob object detection
-- рџ”„ **Odometry**: Track movement relative to starting point
+- 🚁 **Flight Control**: Takeoff, landing, altitude hold
+- 🧭 **Navigation**: Movement to coordinates in different reference frames
+- 🎯 **Stabilization**: PID controllers for automatic position hold
+- 👁️ **Image Processing**: ArUco marker and blob object detection
+- 🔄 **Odometry**: Track movement relative to starting point
 - **Autonomous flight update**: For most drones there are built-in PID presets in [`agrotechsimapi/utils/drone_setups.py`](agrotechsimapi/utils/drone_setups.py), and every regulator can still be overridden manually. See example: [`examples_high_level/simple_flight/pid_waypoints_flight.py`](examples_high_level/simple_flight/pid_waypoints_flight.py).
 
-### рџ“Ѓ Usage Examples
+### 📁 Usage Examples
 
 The repository includes ready-to-use examples:
 
@@ -299,7 +299,7 @@ The repository includes ready-to-use examples:
 
 #### `examples_high_level/` - High-level examples
 
-### рџљЂ Quick Start
+### 🚀 Quick Start
 
 ```python
 from agrotechsimapi import SimClient, CaptureType
@@ -317,16 +317,16 @@ cv2.waitKey(0)
 cv2.destroyAllWindows()
 ```
 
-### рџ§Є Functionality Testing
+### 🧪 Functionality Testing
 
 To verify that the module works correctly with the simulator, use the integration tests. The `test_sim_client_real.py` file contains tests that check the connection to the simulator and the operation of all main functions.
 
-#### рџ“‹ Prerequisites:
+#### 📋 Prerequisites:
 1. **Running AgroTechSim simulator** on `localhost:8080`
 2. **Drone spawned** in the simulator
 3. **Python 3.10+ installed** with necessary dependencies
 
-#### рџљЂ Running tests:
+#### 🚀 Running tests:
 
 ```bash
 # Go to the project directory
@@ -336,23 +336,23 @@ cd TechSimApi
 pytest tests/test_sim_client_real.py --with-simulator -v
 ```
 
-#### рџ“Љ What the tests check:
+#### 📊 What the tests check:
 
 The `test_sim_client_real.py` test sequentially verifies:
 
-1. **вњ… Connection to simulator** - connection check
-2. **вњ… Camera image capture** - color, thermal, depth cameras
-3. **вњ… Kinematic data** - drone position and orientation
-4. **вњ… Rangefinder data** - distance measurement
-5. **вњ… Lidar scanning** - 360В° environment scanning
-6. **вњ… Radar** - nearest object detection
-7. **вњ… LED control** - turning lights on/off
-8. **вњ… Image processing** - adding noise and artifacts
-9. **вњ… Multiple cameras** - working with different camera IDs
-10. **вњ… Error handling** - correct response to invalid parameters
-11. **вњ… Performance** - response time of main functions
+1. **✅ Connection to simulator** - connection check
+2. **✅ Camera image capture** - color, thermal, depth cameras
+3. **✅ Kinematic data** - drone position and orientation
+4. **✅ Rangefinder data** - distance measurement
+5. **✅ Lidar scanning** - 360° environment scanning
+6. **✅ Radar** - nearest object detection
+7. **✅ LED control** - turning lights on/off
+8. **✅ Image processing** - adding noise and artifacts
+9. **✅ Multiple cameras** - working with different camera IDs
+10. **✅ Error handling** - correct response to invalid parameters
+11. **✅ Performance** - response time of main functions
 
-#### вљ пёЏ Important testing notes:
+#### ⚠️ Important testing notes:
 
 - **Simulator must be running** before starting tests
 - **Tests may be skipped** if a particular sensor is not available in the current simulator configuration
@@ -360,30 +360,30 @@ The `test_sim_client_real.py` test sequentially verifies:
 - **For manual checking** you can use the script:
 
 
-#### рџ”§ Example of successful test output:
+#### 🔧 Example of successful test output:
 
 ```
 ============================================================
 Running SimClient Integration Tests with Real Simulator
 ============================================================
 
-test_connection: вњ“ PASSED
-test_get_camera_capture: вњ“ PASSED  
-test_get_kinematics_data: вњ“ PASSED
-test_get_range_data: вњ“ PASSED
-test_get_laser_scan: вњ“ PASSED
-test_get_radar_point: вљ  SKIPPED (Radar not available)
-test_led_control: вњ“ PASSED
-test_image_processing_methods: вњ“ PASSED
-test_multiple_camera_ids: вњ“ PASSED
-test_call_event_action: вњ“ PASSED
-test_error_handling: вњ“ PASSED
-test_performance: вњ“ PASSED
+test_connection: ✓ PASSED
+test_get_camera_capture: ✓ PASSED  
+test_get_kinematics_data: ✓ PASSED
+test_get_range_data: ✓ PASSED
+test_get_laser_scan: ✓ PASSED
+test_get_radar_point: ⚠ SKIPPED (Radar not available)
+test_led_control: ✓ PASSED
+test_image_processing_methods: ✓ PASSED
+test_multiple_camera_ids: ✓ PASSED
+test_call_event_action: ✓ PASSED
+test_error_handling: ✓ PASSED
+test_performance: ✓ PASSED
 
-вњ… All main functions work correctly!
+✅ All main functions work correctly!
 ```
 
-#### рџђ› If tests fail:
+#### 🐛 If tests fail:
 
 1. **Check connection to simulator:**
 ```python
