@@ -20,12 +20,12 @@ def main():
 
     client = HighLevelSimClient(
         drone_name="DEFAULT",
-        #pid_pos_x=pid_pos_x,
-        #pid_pos_y=pid_pos_y,
-        #pid_vel_pitch=pid_vel_pitch,
-        #pid_vel_roll=pid_vel_roll,
-        #pid_yaw=pid_yaw,
-        #pid_height=pid_height,
+        pid_pos_x=pid_pos_x,
+        pid_pos_y=pid_pos_y,
+        pid_vel_pitch=pid_vel_pitch,
+        pid_vel_roll=pid_vel_roll,
+        pid_yaw=pid_yaw,
+        pid_height=pid_height,
     )
 
     try:
