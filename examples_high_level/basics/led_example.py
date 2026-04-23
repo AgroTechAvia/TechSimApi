@@ -16,13 +16,13 @@ def main():
 
         while True:
             # client.setDiod(id, r, g, b)
-            client.setDiod(0,255, 0, 0)
+            client.setDiod(0, 255, 0, 0)
             time.sleep(1)
-            client.setDiod(0,0, 255, 0)
+            client.setDiod(0, 0, 255, 0)
             time.sleep(1)
-            client.setDiod(0,0, 0, 255)
+            client.setDiod(0, 0, 0, 255)
             time.sleep(1)
-            client.setDiod(0,0, 0, 0)
+            client.setDiod(0, 0, 0, 0)
             time.sleep(1)
     except Exception as err:
         print(f"[ERROR] {err}")
