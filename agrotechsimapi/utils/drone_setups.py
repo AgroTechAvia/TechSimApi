@@ -3,16 +3,21 @@ from typing import Dict
 
 
 def default_height_pid_processing(x):
-    """Apply default nonlinear scaling for altitude PID output."""
     return ((2 / (1 + (2.7 ** (-x * 4.125)))) - 1) * 1.7
 
 def edu_extended_height_pid_processing(x):
-    """Apply EDU_EXTENDED nonlinear scaling for altitude PID output."""
-    return ((2 / (1 + (2.7 ** (-x * 4.0)))) - 1) * 1.68
+    return ((2 / (1 + (2.7 ** (-x * 4.25)))) - 1) * 1.7
 
 def big_drone_height_pid_processing(x):
-    """Apply EDU_EXTENDED nonlinear scaling for altitude PID output."""
     return ((2 / (1 + (2.7 ** (-x * 2.7)))) - 1) * 1.65
+
+def multifunctional_height_pid_processing(x):
+    return ((2 / (1 + (2.7 ** (-x * 4.0)))) - 1) * 1.7
+
+def t40_height_pid_processing(x):
+    return ((2 / (1 + (2.7 ** (-x * 2.875)))) - 1) * 1.685
+def phantom_height_pid_processing(x):
+    return ((2 / (1 + (2.7 ** (-x * 4.25)))) - 1) * 1.7
 
 
 DRONE_PID_SETUPS: Dict[str, Dict[str, Dict]] = {
@@ -21,7 +26,7 @@ DRONE_PID_SETUPS: Dict[str, Dict[str, Dict]] = {
         "pid_pos_y": {"kp": 1.85, "ki": 0.0, "kd": 1.5, "max_control": 0.2, "i_limit": 0.1},
         "pid_vel_pitch": {"kp": 3.15, "ki": 0.0, "kd": 3.4, "max_control": 1.5, "i_limit": 0.0033},
         "pid_vel_roll": {"kp": 3.15, "ki": 0.0, "kd": 3.4, "max_control": 1.5, "i_limit": 0.0033},
-        "pid_yaw": {"kp": 20.0, "ki": 0.0, "kd": 0.4, "max_control": 1.0, "i_limit": None},
+        "pid_yaw": {"kp": 20.0, "ki": 0.0, "kd": 0.4, "max_control": 1.25, "i_limit": None},
         "pid_height": {"kp": 4.5, "ki": 0.0, "kd": 3.5, "i_limit": 1.0, "processing_func": default_height_pid_processing}
     },
     "EDU_EXTENDED": {
@@ -29,8 +34,16 @@ DRONE_PID_SETUPS: Dict[str, Dict[str, Dict]] = {
         "pid_pos_y": {"kp": 1.85, "ki": 0.0, "kd": 1.75, "max_control": 0.25, "i_limit": 0.1},
         "pid_vel_pitch": {"kp": 2.0, "ki": 0.0, "kd": 3.4, "max_control": 2.0, "i_limit": 0.0033},
         "pid_vel_roll": {"kp": 2.0, "ki": 0.0, "kd": 3.4, "max_control": 2.0, "i_limit": 0.0033},
-        "pid_yaw": {"kp": 45.0, "ki": 0.0, "kd": 0.4, "max_control": 1.0, "i_limit": None},
-        "pid_height": {"kp": 3.6, "ki": 0.0, "kd": 3.3, "i_limit": 1.0, "processing_func": edu_extended_height_pid_processing}
+        "pid_yaw": {"kp": 45.0, "ki": 0.0, "kd": 0.4, "max_control": 1.5, "i_limit": None},
+        "pid_height": {"kp": 3.8, "ki": 0.0, "kd": 7.5, "i_limit": 1.0, "processing_func": edu_extended_height_pid_processing}
+    },
+    "MULTIFUNCTIONAL": {
+        "pid_pos_x": {"kp": 1.85, "ki": 0.0, "kd": 1.5, "max_control": 0.25, "i_limit": 0.1},
+        "pid_pos_y": {"kp": 1.85, "ki": 0.0, "kd": 1.5, "max_control": 0.25, "i_limit": 0.1},
+        "pid_vel_pitch": {"kp": 3.15, "ki": 0.0, "kd": 3.2, "max_control": 1.5, "i_limit": 0.0033},
+        "pid_vel_roll": {"kp": 3.15, "ki": 0.0, "kd": 3.2, "max_control": 1.5, "i_limit": 0.0033},
+        "pid_yaw": {"kp": 20.0, "ki": 0.0, "kd": 0.4, "max_control": 1.0, "i_limit": None},
+        "pid_height": {"kp": 4.5, "ki": 0.0, "kd": 11.5, "i_limit": 1.0, "processing_func": multifunctional_height_pid_processing}
     },
     "DJI_MATRICE_210": {
         "pid_pos_x": {"kp": 1.85, "ki": 0.0, "kd": 1.75, "max_control": 0.75, "i_limit": 0.1},
@@ -39,6 +52,23 @@ DRONE_PID_SETUPS: Dict[str, Dict[str, Dict]] = {
         "pid_vel_roll": {"kp": 3.0, "ki": 0.0, "kd": 3.4, "max_control": 2.0, "i_limit": 0.0033},
         "pid_yaw": {"kp": 25.0, "ki": 0.0, "kd": 0.4, "max_control": 2.0, "i_limit": None},
         "pid_height": {"kp": 4.6, "ki": 0.0, "kd": 9.75, "i_limit": 1.0, "processing_func": big_drone_height_pid_processing}
+    },
+    "DJI_T40": {
+        "pid_pos_x": {"kp": 1.85, "ki": 0.0, "kd": 1.75, "max_control": 0.66, "i_limit": 0.1},
+        "pid_pos_y": {"kp": 1.85, "ki": 0.0, "kd": 1.75, "max_control": 0.66, "i_limit": 0.1},
+        "pid_vel_pitch": {"kp": 4.15, "ki": 0.0, "kd": 4.3, "max_control": 2.35, "i_limit": 0.0033},
+        "pid_vel_roll": {"kp": 4.15, "ki": 0.0, "kd": 4.3, "max_control": 2.35, "i_limit": 0.0033},
+        "pid_yaw": {"kp": 10.0, "ki": 0.0, "kd": 5.0, "max_control": 0.5, "i_limit": None},
+        "pid_height": {"kp": 5.0, "ki": 0.0, "kd": 9.25, "i_limit": 1.0, "processing_func": t40_height_pid_processing}
+    },
+
+    "DJI_PHANTOM": {
+        "pid_pos_x": {"kp": 1.85, "ki": 0.0, "kd": 1.75, "max_control": 0.33, "i_limit": 0.1},
+        "pid_pos_y": {"kp": 1.85, "ki": 0.0, "kd": 1.75, "max_control": 0.33, "i_limit": 0.1},
+        "pid_vel_pitch": {"kp": 4.15, "ki": 0.0, "kd": 4.8, "max_control": 1.25, "i_limit": 0.0033},
+        "pid_vel_roll": {"kp": 4.15, "ki": 0.0, "kd": 4.8, "max_control": 1.25, "i_limit": 0.0033},
+        "pid_yaw": {"kp": 10.0, "ki": 0.0, "kd": 1.0, "max_control": 1.0, "i_limit": None},
+        "pid_height": {"kp": 4.25, "ki": 0.0, "kd": 13.0, "i_limit": 1.0, "processing_func": phantom_height_pid_processing}
     },
 
     "AGRO": {
@@ -50,13 +80,26 @@ DRONE_PID_SETUPS: Dict[str, Dict[str, Dict]] = {
         "pid_height": {"kp": 4.6, "ki": 0.0, "kd": 9.75, "i_limit": 1.0, "processing_func": big_drone_height_pid_processing}
     },
 
+    "XAG_P100": {
+        "pid_pos_x": {"kp": 1.85, "ki": 0.0, "kd": 1.95, "max_control": 0.5, "i_limit": 0.1},
+        "pid_pos_y": {"kp": 1.85, "ki": 0.0, "kd": 1.95, "max_control": 0.5, "i_limit": 0.1},
+        "pid_vel_pitch": {"kp": 4.14, "ki": 0.0, "kd": 5.8, "max_control": 1.05, "i_limit": 0.0033},
+        "pid_vel_roll": {"kp": 4.14, "ki": 0.0, "kd": 5.8, "max_control": 1.05, "i_limit": 0.0033},
+        "pid_yaw": {"kp": 10.0, "ki": 0.0, "kd": 5.0, "max_control": 0.33, "i_limit": None},
+        "pid_height": {"kp": 4.6, "ki": 0.0, "kd": 9.75, "i_limit": 1.0, "processing_func": big_drone_height_pid_processing}
+    },
+
 }
 
 DRONE_TAKEOFF_HEIGHTS: Dict[str, float] = {
     "DEFAULT": 1.0,
     "EDU_EXTENDED": 1.0,
+    "MULTIFUNCTIONAL": 1.0,
     "DJI_MATRICE_210": 2.0,
+    "DJI_T40": 2.0,
+    "DJI_PHANTOM": 1.0,
     "AGRO": 2.0,
+    "XAG_P100": 2.0,
 }
 
 

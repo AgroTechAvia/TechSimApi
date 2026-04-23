@@ -661,7 +661,7 @@ class HighLevelSimClient:
             tx, ty = self._target_position
             dist = math.hypot(tx - cx, ty - cy)
             velocity = math.hypot(abs(self._prev_x), abs(self._prev_y))/50
-            if dist < 0.15 and velocity < 0.1:
+            if dist < 0.15: # and velocity < 0.1:
                 logger.info(f"Reached target: {x}, {y}")
                 print(f"[control] go to xy succeed x:{round(cx,2)} y:{round(cy,2)} velocity:{round(velocity,2)}")
                 return True

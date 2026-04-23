@@ -8,18 +8,18 @@ port = "1233"
 
 def main():
     # Configure all PID controllers explicitly.
-    pid_pos_x = PID(kp=1.85, ki=0.0, kd=1.5, max_control=0.2, i_limit=0.1)
-    pid_pos_y = PID(kp=1.85, ki=0.0, kd=1.5, max_control=0.2, i_limit=0.1)
+    pid_pos_x = PID(kp=1.85, ki=0.0, kd=1.5, max_control=0.33, i_limit=0.1)
+    pid_pos_y = PID(kp=1.85, ki=0.0, kd=1.5, max_control=0.33, i_limit=0.1)
 
-    pid_vel_pitch = PID(kp=3.15, ki=0.0, kd=3.4, max_control=2.0, i_limit=0.0033)
-    pid_vel_roll = PID(kp=3.15, ki=0.0, kd=3.4, max_control=2.0, i_limit=0.0033)
+    pid_vel_pitch = PID(kp=4.15, ki=0.0, kd=5.8, max_control=1.05, i_limit=0.0033)
+    pid_vel_roll = PID(kp=4.15, ki=0.0, kd=5.8, max_control=1.05, i_limit=0.0033)
 
-    pid_yaw = PID(kp=20.0, ki=0.0, kd=0.4, max_control=1.0, i_limit=None)
+    pid_yaw = PID(kp=10.0, ki=0.0, kd=5.0, max_control=0.33, i_limit=None)
 
-    pid_height = PID(kp=100, ki=0.0, kd=0.0, i_limit=1.0, processing_func=lambda x: ((2 / (1 + (2.7 ** (-x * 12.0)))) - 1) * 1000)
+    pid_height = PID(kp=4.25, ki=0.0, kd=13.0, i_limit=1.0, processing_func=lambda x: ((2 / (1 + (2.7 ** (-x * 4.25)))) - 1) * 1.7)
 
     client = HighLevelSimClient(
-        drone_name="AGRO",
+        drone_name="DEFAULT",
         #pid_pos_x=pid_pos_x,
         #pid_pos_y=pid_pos_y,
         #pid_vel_pitch=pid_vel_pitch,
@@ -41,8 +41,11 @@ def main():
         # 5) Fly in odom frame to [0.0, 0.0]
         # 6) Land
         print("Takeoff:", client.takeoff())
+        time.sleep(2)
+        print("Height: ", round(client.getHeightRange(),2))
         print("Set height 1.5:", client.setHeight(1.5))
-
+        time.sleep(2)
+        print("Height: ", round(client.getHeightRange(),2))
         # Reset odometry origin before waypoint mission.
         print("Reset odometry:", client.setZeroOdomOpticflow())
         time.sleep(0.5)
