@@ -163,7 +163,7 @@ class HighLevelSimClient:
         self._odom0_xy = (0.0, 0.0)  # (x0, y0) в мировой СК на момент «сброса одометрии»
 
         self._sim_kinematics = None
-        self._sim_ultrasonic = None
+        self._sim_ultrasonic = {rangefinder_id: None for rangefinder_id in range(4)}
 
         # ===== Блокировки =====
         self._client_lock = threading.Lock()
@@ -961,21 +961,30 @@ class HighLevelSimClient:
     
     def getUltrasonic(self):
         with self._client_lock:
-            print(f"[control] ultrasinc: {round(self._sim_ultrasonic,3)}")
-            return self._sim_ultrasonic
+            sonic_data = self._sim_ultrasonic.get(0)
+            if sonic_data is not None:
+                print(f"[control] ultrasinc[0]: {round(sonic_data,3)}")
+            return sonic_data
         
     def getUltrasonicById(self, sonic_id: int):
         with self._client_lock:
-            sonic_data = self._client.get_range_data(
-                                            rangefinder_id=sonic_id,
-                                            range_min=0.15,
-                                            range_max=4,
-                                            is_clear=True,
-                                            range_error=0.0003
-                                            ) 
-            sonic_data = round((sonic_data * 100),3)
-            print(f"[control] ultrasinc: {sonic_data}")
+            sonic_id = int(sonic_id)
+            if sonic_id not in self._sim_ultrasonic:
+                raise ValueError(f"Unsupported ultrasonic sensor id: {sonic_id}")
+
+            sonic_data = self._sim_ultrasonic.get(sonic_id)
+            if sonic_data is not None:
+                print(f"[control] ultrasinc[{sonic_id}]: {round(sonic_data,3)}")
             return sonic_data
+
+    def _read_rangefinder(self, sonic_id: int) -> float:
+        return self._client.get_range_data(
+            rangefinder_id=sonic_id,
+            range_min=0.15,
+            range_max=4,
+            is_clear=True,
+            range_error=0.0003
+        ) * 100
 
     def getRPY(self):
         kin = self.get_sim_kinematics()
@@ -1205,13 +1214,10 @@ class HighLevelSimClient:
                     try:
                         self._sim_kinematics = self._client.get_kinametics_data()
                         self._sim_img = self._client.get_camera_capture(camera_id=self.camera_id)
-                        self._sim_ultrasonic = self._client.get_range_data(
-                            rangefinder_id=0,
-                            range_min=0.15,
-                            range_max=4,
-                            is_clear=True,
-                            range_error=0.0003
-                        ) * 100
+                        self._sim_ultrasonic = {
+                            rangefinder_id: self._read_rangefinder(rangefinder_id)
+                            for rangefinder_id in range(4)
+                        }
                         
                         self._consecutive_errors = 0
                         self._simulator_alive = True

@@ -18,7 +18,7 @@ p2 = 0.002  # second tangential distortion factor
 
 distance_coefficients = np.array([k1, k2, p1, p2, 0], dtype=np.float32)
 
-marker_size = 0.5
+marker_size = 0.2
 
 #aruco.getPredefinedDictionary(aruco.DICT_4X4_50) # для новой комнаты
 #aruco.getPredefinedDictionary(aruco.DICT_ARUCO_ORIGINAL)  # для 1 комнаты из обычного симулятора 
