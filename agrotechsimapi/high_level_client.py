@@ -1,4 +1,4 @@
-"""
+﻿"""
 HighLevelSimClient - клиент высокого уровня для управления дроном в симуляторе TechSim.
 
 Реализует каскадное PID-управление с двумя режимами:
@@ -73,18 +73,18 @@ class HighLevelSimClient:
         self.camera_id = 0
 
 
-        self._pid_pos_x = PID(kp=1.85, ki=0.0, kd=1.5, max_control=self._max_velocity,
+        self._pid_pos_x = PID(kp=1.0, ki=0.0, kd=1.75, max_control=self._max_velocity,
                               i_limit=0.1)
-        self._pid_pos_y = PID(kp=1.85, ki=0.0, kd=1.5, max_control=self._max_velocity,
+        self._pid_pos_y = PID(kp=1.0, ki=0.0, kd=1.75, max_control=self._max_velocity,
                               i_limit=0.1)
 
         # Скорость → PWM (PD-регулятор, МАКСИМАЛЬНАЯ СТАБИЛЬНОСТЬ)
         # kp=4.0: достаточно для точного следования за целевой скоростью
         # ki=0.001: маленький интеграл для устранения steady-state ошибки
         # kd=3.6: демпфирование для подавления осцилляций
-        self._pid_vel_pitch = PID(kp=3.15, ki=0.0, kd=3.4,
+        self._pid_vel_pitch = PID(kp=3.15, ki=0.0, kd=5.0,
                               max_control=1.5, i_limit=0.0033)
-        self._pid_vel_roll = PID(kp=3.15, ki=0.0, kd=3.4,
+        self._pid_vel_roll = PID(kp=3.15, ki=0.0, kd=5.0,
                               max_control=1.5, i_limit=0.0033)
 
         # Yaw PID (внешний контур: позиция → скорость)
@@ -115,6 +115,13 @@ class HighLevelSimClient:
         self._roll_direction = -1.0    # Направление roll: +1 или -1
         self._pitch_direction = 1.0   # Направление pitch: +1 или -1
         self._yaw_direction = 1.0     # Направление yaw: +1 или -1
+        # ====================================================================
+
+        # ===== КОМПЕНСАЦИЯ МЕРТВОЙ ЗОНЫ ДЛЯ УПРАВЛЕНИЯ СКОРОСТЬЮ =====
+        # Значение в "control units": 0.7 соответствует RC offset ~= 70us.
+        self._vel_deadzone_control = 0.7
+        self._vel_deadzone_error = 0.01
+        self._vel_deadzone_target = 0.005
         # ====================================================================
 
         # ===== ПЕРЕМЕННЫЕ СОСТОЯНИЯ =====
@@ -380,21 +387,13 @@ class HighLevelSimClient:
 
                 return
 
-            # Получаем текущую позицию в мировой СК
-            x_w = sim_to_api_distance(kin["location"][0])
-            y_w = sim_to_api_distance(kin["location"][1])
-
             # Получаем текущий yaw дрона (CW, радианы)
             yaw = self._get_yaw_cw()
             cos_yaw = math.cos(yaw)
             sin_yaw = math.sin(yaw)
 
-            # Вычисляем текущую скорость в мировой СК (конечные разности)
-            raw_vx_world = (x_w - self._prev_x) * 50  # 50 Гц
-            raw_vy_world = (y_w - self._prev_y) * 50
-
-            self._prev_x = x_w
-            self._prev_y = y_w
+            # Берем текущую линейную скорость из симулятора в мировой СК (м/с).
+            raw_vx_world, raw_vy_world, _ = kin["linear_velocity"]
 
             # ===== LOW-PASS ФИЛЬТРАЦИЯ СКОРОСТИ (в мировой СК) =====
             if not self._vel_filter_initialized:
@@ -458,17 +457,53 @@ class HighLevelSimClient:
             # Применяем коэффициенты направления и конвертируем в PWM + feedforward
             pitch_control = self._pid_vel_pitch.get_control() * (1 + feedforward_pitch )
             roll_control = self._pid_vel_roll.get_control() *  (1 + feedforward_roll )
+
+            pitch_control = self._apply_velocity_deadzone(
+                pitch_control,
+                tvx_body,
+                vx_body
+            )
+            roll_control = self._apply_velocity_deadzone(
+                roll_control,
+                tvy_body,
+                vy_body
+            )
             
             pitch_pwm = int(vel_to_rc_signal(pitch_control * self._pitch_direction))
             roll_pwm = int(vel_to_rc_signal(roll_control * self._roll_direction))
 
             # Обновляем roll/pitch, не трогая yaw
-            if self._control_mode == "position":
+            if self._control_mode in ("position", "velocity"):
                 _, _, y = self._rpy_vel_data
                 self._rpy_vel_data = (roll_pwm, pitch_pwm, y)
 
         except Exception as e:
             logger.warning(f"Error in velocity_callback: {e}")
+
+    def _apply_velocity_deadzone(self, control: float, target_velocity: float, current_velocity: float) -> float:
+        """
+        Компенсирует мертвую зону симулятора/RC для малых скоростей.
+
+        Если цель ненулевая и ошибка скорости еще заметная, выход PID должен быть
+        не меньше минимально эффективного наклона. Направление берем по ошибке,
+        поэтому компенсация отключается около цели и может тормозить при перелете.
+        """
+        if abs(target_velocity) < self._vel_deadzone_target:
+            return control
+
+        velocity_error = target_velocity - current_velocity
+        if abs(velocity_error) < self._vel_deadzone_error:
+            return control
+
+        error_direction = math.copysign(1.0, velocity_error)
+        control_direction = math.copysign(1.0, control) if control != 0 else error_direction
+        if control_direction != error_direction:
+            return control
+
+        if abs(control) < self._vel_deadzone_control:
+            return error_direction * self._vel_deadzone_control
+
+        return control
 
     def height_callback(self):
         """
@@ -522,15 +557,8 @@ class HighLevelSimClient:
         print(f"\n[control] set velocity xy x:{round(vx,2)} y:{round(vy,2)}")
         self._control_mode = "velocity"
 
-        pitch_pwm = int(vel_to_rc_signal(vx))
-        roll_pwm = int(vel_to_rc_signal(vy))
-
-        # Обновляем roll/pitch, не трогая yaw
-        _, _, y = self._rpy_vel_data
-        self._rpy_vel_data = (roll_pwm, pitch_pwm, y)
-
         # Если скорость задана в мировой СК, преобразуем в СК дрона
-        '''if frame == "odom":
+        if frame == "odom":
             yaw = self._get_yaw_cw()
             cos_yaw = math.cos(yaw)
             sin_yaw = math.sin(yaw)
@@ -539,15 +567,17 @@ class HighLevelSimClient:
             # [ sin_yaw    cos_yaw ] [vy_world]
             vx_body = vx * cos_yaw - vy * sin_yaw
             vy_body = vx * sin_yaw + vy * cos_yaw
-        else:
+        elif frame == "base_link":
             vx_body = vx
             vy_body = vy
+        else:
+            raise ValueError("frame must be 'odom' or 'base_link'")
 
         # Ограничиваем скорость максимумом
         vx_body = max(-self._max_velocity * 2, min(self._max_velocity * 2, vx_body))
         vy_body = max(-self._max_velocity * 2, min(self._max_velocity * 2, vy_body))
 
-        self._target_velocity = (vx_body, vy_body)'''
+        self._target_velocity = (vx_body, vy_body)
 
 
     def set_position_mode(self):
@@ -620,6 +650,42 @@ class HighLevelSimClient:
     def get_max_acceleration(self) -> float:
         """Получить текущее максимальное ускорение"""
         return self._max_acceleration
+
+    def set_velocity_deadzone_compensation(
+        self,
+        control: float = None,
+        error: float = None,
+        target: float = None
+    ):
+        """
+        Настроить компенсацию мертвой зоны для velocity PID.
+
+        Args:
+            control: Минимальный эффективный PID-выход. 0.7 ~= 70us RC offset.
+            error: Минимальная ошибка скорости, при которой включается компенсация.
+            target: Минимальная ненулевая целевая скорость для компенсации.
+        """
+        if control is not None:
+            self._vel_deadzone_control = max(0.0, min(float(control), 1.5))
+        if error is not None:
+            self._vel_deadzone_error = max(0.0, float(error))
+        if target is not None:
+            self._vel_deadzone_target = max(0.0, float(target))
+
+        logger.info(
+            "Velocity deadzone compensation set to control=%s, error=%s, target=%s",
+            self._vel_deadzone_control,
+            self._vel_deadzone_error,
+            self._vel_deadzone_target
+        )
+
+    def get_velocity_deadzone_compensation(self) -> dict:
+        """Получить параметры компенсации мертвой зоны velocity PID."""
+        return {
+            "control": self._vel_deadzone_control,
+            "error": self._vel_deadzone_error,
+            "target": self._vel_deadzone_target
+        }
 
     # ===== МЕТОДЫ ДЛЯ НАСТРОЙКИ НАПРАВЛЕНИЯ =====
 
@@ -813,10 +879,17 @@ class HighLevelSimClient:
                 print("[control] go to xy aborted")
                 return False
 
+            kin = self.get_sim_kinematics()
+            velocity = 0.0
+            if kin is not None:
+                cx = sim_to_api_distance(kin["location"][0])
+                cy = sim_to_api_distance(kin["location"][1])
+                vx_world, vy_world, _ = kin["linear_velocity"]
+                velocity = math.hypot(vx_world, vy_world)
+
             # Проверяем расстояние до цели
             tx, ty = self._target_position
             dist = math.hypot(tx - cx, ty - cy)
-            velocity = math.hypot(abs(self._prev_x), abs(self._prev_y))/50
             if dist < 0.15 and velocity < 0.1:  # 5 см допуск
                 logger.info(f"Reached target: {x}, {y}")
                 print(f"[control] go to xy succeed x:{round(cx,2)} y:{round(cy,2)} velocity:{round(velocity,2)}")
@@ -836,12 +909,6 @@ class HighLevelSimClient:
                     continue
             
             prev_dist = dist
-
-            # Обновляем текущую позицию
-            kin = self.get_sim_kinematics()
-            if kin is not None:
-                cx = sim_to_api_distance(kin["location"][0])
-                cy = sim_to_api_distance(kin["location"][1])
 
             time.sleep(0.05)  # 20 Гц
 
