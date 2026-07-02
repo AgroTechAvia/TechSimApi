@@ -82,9 +82,9 @@ class HighLevelSimClient:
         # kp=4.0: достаточно для точного следования за целевой скоростью
         # ki=0.001: маленький интеграл для устранения steady-state ошибки
         # kd=3.6: демпфирование для подавления осцилляций
-        self._pid_vel_pitch = PID(kp=3.15, ki=0.0, kd=5.0,
+        self._pid_vel_pitch = PID(kp=3.15, ki=0.0, kd=4.25,
                               max_control=1.5, i_limit=0.0033)
-        self._pid_vel_roll = PID(kp=3.15, ki=0.0, kd=5.0,
+        self._pid_vel_roll = PID(kp=3.5, ki=0.0, kd=3.0,
                               max_control=1.5, i_limit=0.0033)
 
         # Yaw PID (внешний контур: позиция → скорость)
@@ -122,6 +122,30 @@ class HighLevelSimClient:
         self._vel_deadzone_control = 0.7
         self._vel_deadzone_error = 0.01
         self._vel_deadzone_target = 0.005
+        # ====================================================================
+
+        # ===== MICRO-MOTION ДЛЯ СКОРОСТЕЙ НИЖЕ ФИЗИЧЕСКОГО ПОРОГА =====
+        self._vel_micro_enabled = True
+        self._vel_micro_threshold = 0.05
+        self._vel_micro_pulse_speed = 0.08
+        self._vel_micro_pulse_duration = 0.2
+        self._vel_micro_distance = {"x": 0.0, "y": 0.0}
+        self._vel_micro_active_until = {"x": 0.0, "y": 0.0}
+        self._vel_micro_direction = {"x": 0.0, "y": 0.0}
+        self._vel_micro_last_time = time.monotonic()
+        # ====================================================================
+
+        # ===== ANTI-STUCK ДЛЯ VELOCITY MODE =====
+        self._vel_antistuck_enabled = True
+        self._vel_antistuck_target_threshold = 0.01
+        self._vel_antistuck_actual_threshold = 0.02
+        self._vel_antistuck_timeout = 1.0
+        self._vel_antistuck_boost_speed = 0.2
+        self._vel_antistuck_boost_duration = 0.5
+        self._vel_antistuck_stuck_time = 0.0
+        self._vel_antistuck_last_time = time.monotonic()
+        self._vel_antistuck_active_until = 0.0
+        self._vel_antistuck_direction = (0.0, 0.0)
         # ====================================================================
 
         # ===== ПЕРЕМЕННЫЕ СОСТОЯНИЯ =====
@@ -412,6 +436,27 @@ class HighLevelSimClient:
             # ===== КОНТУР 2: Скорость → PWM =====
             # _target_velocity уже в СК дрона (из set_velocity_xy или position_callback)
             tvx_body, tvy_body = self._target_velocity
+            requested_tvx_body, requested_tvy_body = tvx_body, tvy_body
+
+            now = time.monotonic()
+            dt_micro = max(0.001, min(0.1, now - self._vel_micro_last_time))
+            self._vel_micro_last_time = now
+
+            if self._control_mode == "velocity":
+                antistuck_velocity = self._shape_antistuck_velocity(
+                    requested_tvx_body,
+                    requested_tvy_body,
+                    vx_body,
+                    vy_body,
+                    now
+                )
+                if antistuck_velocity is not None:
+                    tvx_body, tvy_body = antistuck_velocity
+                else:
+                    tvx_body = self._shape_micro_velocity("x", tvx_body, now, dt_micro)
+                    tvy_body = self._shape_micro_velocity("y", tvy_body, now, dt_micro)
+            else:
+                self._reset_antistuck_velocity()
 
             # Ограничение ускорения (в СК дрона)
             dvx = tvx_body - self._prev_target_vx
@@ -505,6 +550,122 @@ class HighLevelSimClient:
 
         return control
 
+    def _shape_micro_velocity(self, axis: str, target_velocity: float, now: float, dt: float) -> float:
+        """
+        Превращает скорость ниже физического порога в импульсы выше порога.
+
+        Для симулятора это честнее, чем пытаться держать постоянный наклон,
+        который не сдвигает дрон: средняя скорость задается duty cycle импульсов.
+        """
+        if not self._vel_micro_enabled:
+            return target_velocity
+
+        speed = abs(target_velocity)
+        if speed < self._vel_deadzone_target:
+            self._reset_micro_velocity_axis(axis)
+            return 0.0
+
+        if speed >= self._vel_micro_threshold:
+            self._reset_micro_velocity_axis(axis)
+            return target_velocity
+
+        direction = math.copysign(1.0, target_velocity)
+        pulse_speed = max(self._vel_micro_threshold, self._vel_micro_pulse_speed)
+        if self._vel_micro_direction[axis] != direction:
+            self._reset_micro_velocity_axis(axis)
+            self._vel_micro_direction[axis] = direction
+            self._vel_micro_active_until[axis] = now + self._vel_micro_pulse_duration
+            return direction * pulse_speed
+
+        if now < self._vel_micro_active_until[axis]:
+            return direction * pulse_speed
+
+        self._vel_micro_distance[axis] += speed * dt
+        pulse_distance = pulse_speed * self._vel_micro_pulse_duration
+        if self._vel_micro_distance[axis] >= pulse_distance:
+            self._vel_micro_distance[axis] -= pulse_distance
+            self._vel_micro_active_until[axis] = now + self._vel_micro_pulse_duration
+            return direction * pulse_speed
+
+        return 0.0
+
+    def _reset_micro_velocity_axis(self, axis: str):
+        self._vel_micro_distance[axis] = 0.0
+        self._vel_micro_active_until[axis] = 0.0
+        self._vel_micro_direction[axis] = 0.0
+
+    def _shape_antistuck_velocity(
+        self,
+        target_vx: float,
+        target_vy: float,
+        current_vx: float,
+        current_vy: float,
+        now: float
+    ) -> Optional[tuple[float, float]]:
+        """
+        Выводит velocity loop из состояния залипания.
+
+        Если исходная целевая скорость ненулевая, но реальная скорость почти
+        нулевая достаточно долго, кратко подменяем target velocity на boost
+        в направлении исходной цели.
+        """
+        if not self._vel_antistuck_enabled:
+            return None
+
+        dt = max(0.001, min(0.1, now - self._vel_antistuck_last_time))
+        self._vel_antistuck_last_time = now
+
+        target_speed = math.hypot(target_vx, target_vy)
+        if target_speed < self._vel_antistuck_target_threshold:
+            self._reset_antistuck_velocity()
+            return None
+
+        if now < self._vel_antistuck_active_until:
+            dx, dy = self._vel_antistuck_direction
+            return dx * self._vel_antistuck_boost_speed, dy * self._vel_antistuck_boost_speed
+
+        direction = (target_vx / target_speed, target_vy / target_speed)
+        progress_speed = current_vx * direction[0] + current_vy * direction[1]
+
+        if progress_speed <= self._vel_antistuck_actual_threshold:
+            self._vel_antistuck_stuck_time = min(
+                self._vel_antistuck_timeout,
+                self._vel_antistuck_stuck_time + dt
+            )
+        else:
+            self._vel_antistuck_stuck_time = max(
+                0.0,
+                self._vel_antistuck_stuck_time - dt * 2.0
+            )
+
+        if self._vel_antistuck_stuck_time < self._vel_antistuck_timeout:
+            return None
+
+        self._vel_antistuck_direction = direction
+        self._vel_antistuck_active_until = now + self._vel_antistuck_boost_duration
+        self._vel_antistuck_stuck_time = 0.0
+
+        self._reset_micro_velocity_axis("x")
+        self._reset_micro_velocity_axis("y")
+        self._pid_vel_pitch.reset()
+        self._pid_vel_roll.reset()
+
+        logger.warning(
+            "Velocity anti-stuck boost: target=(%.3f, %.3f), actual=(%.3f, %.3f), boost=%.3f",
+            target_vx,
+            target_vy,
+            current_vx,
+            current_vy,
+            self._vel_antistuck_boost_speed
+        )
+        return direction[0] * self._vel_antistuck_boost_speed, direction[1] * self._vel_antistuck_boost_speed
+
+    def _reset_antistuck_velocity(self):
+        self._vel_antistuck_stuck_time = 0.0
+        self._vel_antistuck_last_time = time.monotonic()
+        self._vel_antistuck_active_until = 0.0
+        self._vel_antistuck_direction = (0.0, 0.0)
+
     def height_callback(self):
         """
         КОНТУР ВЫСОТЫ: Ошибка по высоте → Throttle (50 Гц).
@@ -555,8 +716,14 @@ class HighLevelSimClient:
         """
         
         print(f"\n[control] set velocity xy x:{round(vx,2)} y:{round(vy,2)}")
+
+        if vx == 0  and vy == 0:
+            self.gotoXYdrone(0,0)
+            return
+
         self._control_mode = "velocity"
 
+        vy = -vy
         # Если скорость задана в мировой СК, преобразуем в СК дрона
         if frame == "odom":
             yaw = self._get_yaw_cw()
@@ -574,8 +741,8 @@ class HighLevelSimClient:
             raise ValueError("frame must be 'odom' or 'base_link'")
 
         # Ограничиваем скорость максимумом
-        vx_body = max(-self._max_velocity * 2, min(self._max_velocity * 2, vx_body))
-        vy_body = max(-self._max_velocity * 2, min(self._max_velocity * 2, vy_body))
+        #vx_body = max(-self._max_velocity * 2, min(self._max_velocity * 2, vx_body))
+        #vy_body = max(-self._max_velocity * 2, min(self._max_velocity * 2, vy_body))
 
         self._target_velocity = (vx_body, vy_body)
 
@@ -685,6 +852,109 @@ class HighLevelSimClient:
             "control": self._vel_deadzone_control,
             "error": self._vel_deadzone_error,
             "target": self._vel_deadzone_target
+        }
+
+    def set_velocity_micro_motion(
+        self,
+        enabled: Optional[bool] = None,
+        threshold: float = None,
+        pulse_speed: float = None,
+        pulse_duration: float = None
+    ):
+        """
+        Настроить импульсный режим для скоростей ниже физического порога.
+
+        Args:
+            enabled: Включить/выключить micro-motion.
+            threshold: Ниже этой скорости включается импульсный режим.
+            pulse_speed: Эффективная скорость импульса, должна быть выше порога залипания.
+            pulse_duration: Длительность одного импульса в секундах.
+        """
+        if enabled is not None:
+            self._vel_micro_enabled = bool(enabled)
+        if threshold is not None:
+            self._vel_micro_threshold = max(0.0, float(threshold))
+        if pulse_speed is not None:
+            self._vel_micro_pulse_speed = max(0.0, float(pulse_speed))
+        if pulse_duration is not None:
+            self._vel_micro_pulse_duration = max(0.02, float(pulse_duration))
+
+        self._reset_micro_velocity_axis("x")
+        self._reset_micro_velocity_axis("y")
+        self._vel_micro_last_time = time.monotonic()
+
+        logger.info(
+            "Velocity micro-motion set to enabled=%s, threshold=%s, pulse_speed=%s, pulse_duration=%s",
+            self._vel_micro_enabled,
+            self._vel_micro_threshold,
+            self._vel_micro_pulse_speed,
+            self._vel_micro_pulse_duration
+        )
+
+    def get_velocity_micro_motion(self) -> dict:
+        """Получить параметры micro-motion для малых скоростей."""
+        return {
+            "enabled": self._vel_micro_enabled,
+            "threshold": self._vel_micro_threshold,
+            "pulse_speed": self._vel_micro_pulse_speed,
+            "pulse_duration": self._vel_micro_pulse_duration
+        }
+
+    def set_velocity_antistuck(
+        self,
+        enabled: Optional[bool] = None,
+        target_threshold: float = None,
+        actual_threshold: float = None,
+        timeout: float = None,
+        boost_speed: float = None,
+        boost_duration: float = None
+    ):
+        """
+        Настроить anti-stuck систему velocity loop.
+
+        Args:
+            enabled: Включить/выключить anti-stuck.
+            target_threshold: Минимальная target speed, при которой мониторинг активен.
+            actual_threshold: Скорость продвижения вдоль target ниже которой считаем, что дрон почти стоит.
+            timeout: Время почти нулевой скорости до recovery boost.
+            boost_speed: Скорость recovery-импульса в направлении target velocity.
+            boost_duration: Длительность recovery-импульса.
+        """
+        if enabled is not None:
+            self._vel_antistuck_enabled = bool(enabled)
+        if target_threshold is not None:
+            self._vel_antistuck_target_threshold = max(0.0, float(target_threshold))
+        if actual_threshold is not None:
+            self._vel_antistuck_actual_threshold = max(0.0, float(actual_threshold))
+        if timeout is not None:
+            self._vel_antistuck_timeout = max(0.0, float(timeout))
+        if boost_speed is not None:
+            self._vel_antistuck_boost_speed = max(0.0, float(boost_speed))
+        if boost_duration is not None:
+            self._vel_antistuck_boost_duration = max(0.02, float(boost_duration))
+
+        self._reset_antistuck_velocity()
+
+        logger.info(
+            "Velocity anti-stuck set to enabled=%s, target_threshold=%s, actual_threshold=%s, timeout=%s, boost_speed=%s, boost_duration=%s",
+            self._vel_antistuck_enabled,
+            self._vel_antistuck_target_threshold,
+            self._vel_antistuck_actual_threshold,
+            self._vel_antistuck_timeout,
+            self._vel_antistuck_boost_speed,
+            self._vel_antistuck_boost_duration
+        )
+
+    def get_velocity_antistuck(self) -> dict:
+        """Получить параметры anti-stuck системы velocity loop."""
+        return {
+            "enabled": self._vel_antistuck_enabled,
+            "target_threshold": self._vel_antistuck_target_threshold,
+            "actual_threshold": self._vel_antistuck_actual_threshold,
+            "timeout": self._vel_antistuck_timeout,
+            "boost_speed": self._vel_antistuck_boost_speed,
+            "boost_duration": self._vel_antistuck_boost_duration,
+            "stuck_time": self._vel_antistuck_stuck_time
         }
 
     # ===== МЕТОДЫ ДЛЯ НАСТРОЙКИ НАПРАВЛЕНИЯ =====
@@ -1681,3 +1951,5 @@ class HighLevelSimClient:
                 cy = sim_to_api_distance(kin["location"][1])
                 self._target_position = (cx, cy)
                 self._control_mode = "position"
+                self.set_velocity_yaw(0)
+                self.gotoXYdrone(0,0)
