@@ -19,7 +19,7 @@ from agrotechsimapi.pid import PID, AdaptivePID
 from typing import Iterable, Optional, Tuple, Literal
 
 from agrotechsimapi.utils.utils import LoopingTimer, sim_to_api_distance, vel_to_rc_signal
-from agrotechsimapi.utils.vision import process_aruco, process_blob, resolution_changes
+from agrotechsimapi.utils.vision import StableArucoTracker, process_aruco, process_blob, resolution_changes
 
 from transforms3d.euler import quat2euler
 
@@ -82,10 +82,10 @@ class HighLevelSimClient:
         # kp=4.0: достаточно для точного следования за целевой скоростью
         # ki=0.001: маленький интеграл для устранения steady-state ошибки
         # kd=3.6: демпфирование для подавления осцилляций
-        self._pid_vel_pitch = PID(kp=3.15, ki=0.0, kd=4.25,
-                              max_control=1.5, i_limit=0.0033)
-        self._pid_vel_roll = PID(kp=3.5, ki=0.0, kd=3.0,
-                              max_control=1.5, i_limit=0.0033)
+        self._pid_vel_pitch = PID(kp=3.15, ki=0.01, kd=4.25,
+                              max_control=1.75, i_limit=0.0033)
+        self._pid_vel_roll = PID(kp=3.15, ki=0.01, kd=4.25,
+                              max_control=1.75, i_limit=0.0033)
 
         # Yaw PID (внешний контур: позиция → скорость)
         #self._pid_yaw_pos = PID(kp=1, ki=0.0, kd=1.5, max_control=2, i_limit=None)  # max_control = максимальная скорость рад/с
@@ -187,9 +187,12 @@ class HighLevelSimClient:
         self._sim_img = None
         self._blob_img = None
         self._aruco_img = None
+        self._aruco_raw_data = []
+        self._camera_pose_aruco_raw_data = []
         self._aruco_data = []
         self._camera_pose_aruco_data = []
         self._blob_data = []
+        self._stable_aruco_tracker = StableArucoTracker()
 
         self._odom0_xy = (0.0, 0.0)  # (x0, y0) в мировой СК на момент «сброса одометрии»
 
@@ -214,6 +217,12 @@ class HighLevelSimClient:
     
     def connect(self, ip, port):
         """Подключение к симулятору"""
+        self._stable_aruco_tracker.reset()
+        self._aruco_raw_data = []
+        self._camera_pose_aruco_raw_data = []
+        self._aruco_data = []
+        self._camera_pose_aruco_data = []
+
         self.__HOST = ip
         self.__SIM_PORT = 8080
         self.__TCP_PORT = 5762
@@ -717,8 +726,27 @@ class HighLevelSimClient:
         
         print(f"\n[control] set velocity xy x:{round(vx,2)} y:{round(vy,2)}")
 
-        if vx == 0  and vy == 0:
-            self.gotoXYdrone(0,0)
+        if vx == 0 and vy == 0:
+            kin = self.get_sim_kinematics()
+            if kin is not None:
+                cx = sim_to_api_distance(kin["location"][0])
+                cy = sim_to_api_distance(kin["location"][1])
+
+                # Останавливаем горизонтальное движение в текущей точке,
+                # но не трогаем yaw-режим: это важно для setVelXYYaw,
+                # где vx/vy могут быть нулевыми, а yaw_rate — нет.
+                self._target_position = (cx, cy)
+                self._target_velocity = (0.0, 0.0)
+                self._control_mode = "position"
+
+                self._pid_pos_x.reset()
+                self._pid_pos_y.reset()
+                self._pid_vel_pitch.reset()
+                self._pid_vel_roll.reset()
+                self._reset_micro_velocity_axis("x")
+                self._reset_micro_velocity_axis("y")
+                self._reset_antistuck_velocity()
+
             return
 
         self._control_mode = "velocity"
@@ -765,6 +793,7 @@ class HighLevelSimClient:
         """
         print(f"\n[control] set yaw:{round(yaw_rate,2)}")
         self._yaw_mode = "velocity"
+        self._target_yaw_rate = float(yaw_rate)
         # Ограничиваем максимальную скорость поворота (например, 1.5 рад/с ≈ 86°/с)
         '''max_yaw_rate = 1.5
         self._target_yaw_rate = max(-max_yaw_rate, min(max_yaw_rate, yaw_rate))'''
@@ -776,6 +805,10 @@ class HighLevelSimClient:
     def set_yaw_position_mode(self):
         """Включить режим позиции для yaw (внешний контур активен, используется _target_yaw)"""
         self._yaw_mode = "position"
+        current_yaw = self._get_yaw_cw()
+        self._target_yaw = self._wrap_pi(current_yaw)
+        self._target_yaw_rate = 0.0
+        self._pid_yaw.reset()
 
     def lock_motors(self):
         """Заблокировать обновление моторов (для setYaw и аварий)"""
@@ -1081,7 +1114,9 @@ class HighLevelSimClient:
         self._control_mode = "position"
         if self._yaw_mode == "velocity":
             self._yaw_mode = "position"
-            self._target_yaw = self._wrap_pi(0)
+            self._target_yaw = self._wrap_pi(self._get_yaw_cw())
+            self._target_yaw_rate = 0.0
+            self._pid_yaw.reset()
         # 3. Вычисляем целевую позицию
         kin = self.get_sim_kinematics()
         if kin is None:
@@ -1595,18 +1630,18 @@ class HighLevelSimClient:
     
     def setVelXYYaw(self, x, y, yaw):
         """
-        Устаревший метод - используйте set_velocity_xy и setYaw отдельно.
-        
-        Этот метод теперь просто делегирует set_velocity_xy,
-        а yaw игнорируется (для обратной совместимости).
+        Устаревший метод - используйте set_velocity_xy и set_velocity_yaw отдельно.
+
+        Для обратной совместимости сохраняем старый публичный API,
+        но yaw трактуется именно как скорость поворота, а не игнорируется.
         
         Args:
-            x: Скорость по X в мировой СК (м/с)
-            y: Скорость по Y в мировой СК (м/с)
-            yaw: Игнорируется (оставлен для обратной совместимости)
+            x: Скорость по X в СК дрона (м/с)
+            y: Скорость по Y в СК дрона (м/с)
+            yaw: Скорость yaw (рад/с)
         """
-        logger.warning("setVelXYYaw is deprecated, use set_velocity_xy + setYaw")
-        # Преобразуем в мировую СК (предполагаем, что входные данные в СК дрона)
+        logger.warning("setVelXYYaw is deprecated, use set_velocity_xy + set_velocity_yaw")
+        self.set_velocity_yaw(yaw)
         self.set_velocity_xy(x, y, frame="base_link")
     
     def armDrone(self):
@@ -1823,9 +1858,15 @@ class HighLevelSimClient:
     
     def getArucos(self):
         return self._aruco_data
+
+    def getRawArucos(self):
+        return self._aruco_raw_data
     
     def getCameraPoseAruco(self):
         return self._camera_pose_aruco_data
+
+    def getRawCameraPoseAruco(self):
+        return self._camera_pose_aruco_raw_data
     
     def getBlobs(self):
         return self._blob_data
@@ -1844,7 +1885,11 @@ class HighLevelSimClient:
         img_blob = camera_img.copy() if self._sim_img is not None else None
         
         if img_aruco is not None:
-            self._aruco_data, self._camera_pose_aruco_data, aruco_img = process_aruco(img_aruco)
+            self._aruco_raw_data, self._camera_pose_aruco_raw_data, aruco_img = process_aruco(img_aruco)
+            self._aruco_data, self._camera_pose_aruco_data = self._stable_aruco_tracker.update(
+                self._aruco_raw_data,
+                self._camera_pose_aruco_raw_data,
+            )
             if aruco_img is None:
                 self._aruco_img = sim_img
             else:
@@ -1949,7 +1994,31 @@ class HighLevelSimClient:
             if kin is not None:
                 cx = sim_to_api_distance(kin["location"][0])
                 cy = sim_to_api_distance(kin["location"][1])
+
+                current_yaw = self._get_yaw_cw()
+
+                # Фиксируем дрон в текущей точке независимо от того,
+                # летел он по позиции или по скорости.
                 self._target_position = (cx, cy)
+                self._target_velocity = (0.0, 0.0)
                 self._control_mode = "position"
-                self.set_velocity_yaw(0)
-                self.gotoXYdrone(0,0)
+
+                # Останавливаем вращение по yaw и удерживаем текущий угол,
+                # а не возвращаемся к нулю.
+                self._yaw_mode = "position"
+                self._target_yaw = current_yaw
+                self._target_yaw_rate = 0.0
+
+                # Сбрасываем внутренние состояния контроллеров, чтобы
+                # не доигрывались прошлые команды после abort.
+                self._pid_pos_x.reset()
+                self._pid_pos_y.reset()
+                self._pid_vel_pitch.reset()
+                self._pid_vel_roll.reset()
+                self._pid_yaw.reset()
+                self._reset_micro_velocity_axis("x")
+                self._reset_micro_velocity_axis("y")
+                self._reset_antistuck_velocity()
+
+                # Немедленно центрируем горизонтальные каналы и yaw.
+                self._rpy_vel_data = (1500, 1500, 1500)
