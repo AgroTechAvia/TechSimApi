@@ -18,7 +18,7 @@ client.armDrone()
 
 time.sleep(2.0)
 
-client.posholdOn()
+client.altholdOn()
 
 time.sleep(2.0)
 
@@ -52,6 +52,6 @@ time.sleep(3)
 client.disarmDrone()
 time.sleep(1)
 
-client.posholdOff()
+client.altholdOff()
 
 client.disconnect()

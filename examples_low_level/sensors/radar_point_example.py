@@ -17,15 +17,18 @@ def main(args):
         # Получение данных с радара
         # radar_id - номер радара: 0(передний)/1(задний)/2(нижний)
         # base_angle - базовый угол сканирования (45 градусов)
-        # range_min - минимальная дистанция обнаружения (150 мм)
-        # range_max - максимальная дистанция обнаружения (2000 мм)
+        # range_min - минимальная дистанция обнаружения (0.0 м)
+        # range_max - максимальная дистанция обнаружения (2 м)
         # is_clear - очистка предыдущих данных
         # range_error - погрешность измерения дистанции (0.15)
-        # angle_error - погрешность измерения угла (0.015)
-        result = client.get_radar_point(radar_id=args.radar_num,base_angle=45, range_min=150, range_max=2000,is_clear=True,range_error=0.15,angle_error=0.015)
+        # angle_error - сохранён для обратной совместимости; сервер не возвращает углы
+        result = client.get_radar_point(radar_id=args.radar_num,base_angle=45, range_min=0.0, range_max=2.0,is_clear=True,range_error=0.15,angle_error=0.015)
         
-        # Вывод результата сканирования радара
-        print(result)
+        # Вывод расстояния до ближайшей точки; отрицательное значение означает отсутствие цели
+        if result < 0:
+            print("No target detected")
+        else:
+            print(f"Distance: {result:.3f} m")
         
         # Задержка для ограничения частоты опроса (30 Hz)
         time.sleep(1/30)

@@ -39,6 +39,18 @@ class HighLevelSimClient:
 
     ControlMode = Literal["position", "velocity"]
 
+    _ARM_RESET_FRAME = (1000, 1000, 1000, 1000, 1000, 1000, 1000)
+    _ARM_SWITCH_FRAME = (1000, 1000, 1000, 1000, 2000, 1000, 1000)
+    _ARMED_NEUTRAL_FRAME = (1500, 1500, 1000, 1500, 2000, 1000, 1000)
+    _ARM_FRAME_FREQUENCY = 20.0
+    _ARM_SETTLE_SECONDS = 1.0
+
+    _ALTHOLD_MODE_ID = 3
+    _ALTHOLD_AUX_CHANNEL_INDEX = 2
+    _ALTHOLD_RANGE_START = 1250
+    _ALTHOLD_RANGE_END = 1350
+    _ALTHOLD_AUX_VALUE = 1300
+
     _max_velocity = 0.2  # Maximum linear speed in m/s.
     _max_acceleration = 0.75  # Maximum linear acceleration in m/s^2.
     # =======================================================
@@ -160,6 +172,7 @@ class HighLevelSimClient:
         self._armed_flag = False
         self._poshold_flag = False
         self._althold_flag = False
+        self._althold_range_configured = False
 
         self._sim_img = None
         self._blob_img = None
@@ -174,6 +187,8 @@ class HighLevelSimClient:
         self._sim_ultrasonic = None
 
         self._client_lock = threading.Lock()
+        self._msp_io_lock = threading.Lock()
+        self._arming_rc_frame = None
 
         self._consecutive_errors = 0
         self._error_threshold = 2
@@ -198,11 +213,13 @@ class HighLevelSimClient:
         self._control = MultirotorControl(self.__tcp_transmitter)
         time.sleep(2)
         print("[info] Adding ALTHOLD range... ")
-        self.add_range_for_althold()
+        self._althold_range_configured = self.add_range_for_althold()
+        if not self._althold_range_configured:
+            logger.error("NAV ALTHOLD range was not configured; autonomous takeoff is unavailable")
 
         print("[info] Resetting MSP arming flags... ")
         try:
-            self._control.send_RAW_RC([1000, 1000, 1000, 1000, 1000, 1000, 1000])
+            self._send_rc_frame(self._ARM_RESET_FRAME)
             time.sleep(0.5)
         except Exception as e:
             logger.warning(f"Could not reset MSP flags: {e}")
@@ -248,7 +265,7 @@ class HighLevelSimClient:
 
         print("[info] Disarming drone before disconnect... ")
         self.disarmDrone()
-        self.posholdOff()
+        self.altholdOff()
 
         time.sleep(0.5)
 
@@ -902,6 +919,21 @@ class HighLevelSimClient:
         """Perform blocking takeoff to nominal hover altitude."""
         print("\n[control] take off")
 
+        if not self._armed_flag:
+            logger.warning("takeoff requested while the drone is disarmed")
+            print("[control] take off failed: drone is disarmed")
+            return False
+
+        if not self._althold_range_configured:
+            logger.error("takeoff requested without a configured NAV ALTHOLD range")
+            print("[control] take off failed: NAV ALTHOLD is not configured")
+            return False
+
+        # The high-level altitude PID controls throttle itself, so its
+        # autonomous flight mode is NAV ALTHOLD, not NAV POSHOLD.
+        if not self._althold_flag:
+            self.altholdOn()
+
         PERIOD = 0.05
         MIN_H = 0.00
         TAKEOFF_H = self._takeoff_height
@@ -1114,13 +1146,29 @@ class HighLevelSimClient:
             return
 
         try:
-            roll, pitch, yaw = self._rpy_vel_data
-            raw_rc = [roll, pitch, self._throttle_data, yaw, self._arm_data, self._fliyng_mode, self._nav_mode]
-            raw_rc = self.clamp_rc_list(raw_rc)
-            msg = self._control.send_RAW_RC(raw_rc)
-            data_handler = self._control.receive_msg()
-        except Exception:
-            pass
+            with self._msp_io_lock:
+                if self._arming_rc_frame is not None:
+                    raw_rc = self._arming_rc_frame
+                else:
+                    raw_rc = self._current_rc_frame()
+
+                self._control.send_RAW_RC(self.clamp_rc_list(raw_rc))
+                self._control.receive_msg()
+        except Exception as exc:
+            logger.warning("Could not send RC frame: %s", exc)
+
+    def _current_rc_frame(self) -> list:
+        """Build the normal seven-channel RC frame from current control state."""
+        roll, pitch, yaw = self._rpy_vel_data
+        return [
+            roll,
+            pitch,
+            self._throttle_data,
+            yaw,
+            self._arm_data,
+            self._fliyng_mode,
+            self._nav_mode,
+        ]
     
     def setVelXY(self, x, y):
         """Deprecated wrapper around set_velocity_xy."""
@@ -1132,27 +1180,81 @@ class HighLevelSimClient:
         self.set_velocity_xy(x, y, frame="base_link")
     
     def armDrone(self):
-        """Arm drone and start altitude control timer."""
-        self._throttle_data = 1000
-        
-        #self._pid_height_pos.reset()
-        #self._pid_height_vel.reset()
-        
+        """Arm with the raw-RC sequence verified by ``arm_drone_debug.py``."""
+        if self._armed_flag:
+            return True
+
+        print("[info] Sending ARM RC sequence...")
         self._target_height_vel = 0.0
-        
-        self._armed_flag = True
-        self._arm_data = 2000
 
-        time.sleep(0.2)
-        #self._height_pos_timer.start()
-        #self._height_vel_timer.start()
-        #self._height_pos_timer.start()
-        #self._height_vel_timer.start()
+        try:
+            # Keep the exact frame active in the 50 Hz sender as well as send
+            # it once synchronously.  PID callbacks cannot replace this frame.
+            self._arming_rc_frame = self._ARM_RESET_FRAME
+            self._send_rc_frame(self._ARM_RESET_FRAME)
+            time.sleep(self._ARM_SETTLE_SECONDS)
 
-        self._height_timer.start()
+            self._arming_rc_frame = self._ARM_SWITCH_FRAME
+            self._send_rc_frame(self._ARM_SWITCH_FRAME)
+
+            # INAV must immediately receive neutral roll/pitch/yaw with the
+            # ARM switch high; this is the sequence used by input_driver.py.
+            self._rpy_vel_data = (1500, 1500, 1500)
+            self._throttle_data = 1000
+            self._arm_data = 2000
+            self._fliyng_mode = 1000
+            self._nav_mode = 1000
+            self._arming_rc_frame = self._ARMED_NEUTRAL_FRAME
+            self._send_rc_frame(self._ARMED_NEUTRAL_FRAME)
+
+            # The debug script transmits this frame synchronously at 20 Hz.
+            # Do the same here: the background RC timer may be stopped when
+            # the simulator RPC becomes unavailable, but that must not cut
+            # short the MSP arming sequence.
+            self._hold_rc_frame(
+                self._ARMED_NEUTRAL_FRAME,
+                duration=self._ARM_SETTLE_SECONDS,
+                frequency=self._ARM_FRAME_FREQUENCY,
+            )
+            self._arming_rc_frame = None
+            self._armed_flag = True
+            self._height_timer.start()
+        except Exception:
+            self._arming_rc_frame = None
+            self._armed_flag = False
+            self._arm_data = 1000
+            raise
+
+        print("[info] ARM RC sequence sent")
+        return True
+
+    def _send_rc_frame(self, raw_rc: Iterable) -> None:
+        """Synchronously send one RC frame without racing the RC timer."""
+        with self._msp_io_lock:
+            self._control.send_RAW_RC(self.clamp_rc_list(raw_rc))
+            self._control.receive_msg()
+
+    def _hold_rc_frame(self, raw_rc: Iterable, *, duration: float, frequency: float) -> None:
+        """Synchronously retain an RC frame for a fixed interval.
+
+        This deliberately does not use ``transmit_rc_to_sim``: that callback
+        is coupled to simulator-RPC liveness, while arming is an MSP-only
+        operation and must complete even when RPC data is temporarily absent.
+        """
+        if duration < 0:
+            raise ValueError("duration must not be negative")
+        if frequency <= 0:
+            raise ValueError("frequency must be positive")
+
+        deadline = time.monotonic() + duration
+        period = 1.0 / frequency
+        while time.monotonic() < deadline:
+            self._send_rc_frame(raw_rc)
+            time.sleep(period)
 
     def disarmDrone(self):
         """Disarm drone and reset throttle outputs."""
+        self._arming_rc_frame = None
         self._armed_flag = False
         self._arm_data = 1000
         self._throttle_data = 1000
@@ -1169,6 +1271,7 @@ class HighLevelSimClient:
     def posholdOn(self):
         """Enable POSHOLD-related channel configuration."""
         self._poshold_flag = True
+        self._althold_flag = False
         self._nav_mode = 1500
         self._base_throttle_hover = 1500
         self.unlock_motors()
@@ -1183,104 +1286,104 @@ class HighLevelSimClient:
         self._pid_height.reset()
         self.lock_motors()
 
-    def add_range_for_althold(self, mode_id=3, channel_index=2, range_start=1250, range_end=1350):
-        """Add NAV ALTHOLD mode range entry in MSP configuration."""
-        def encode_range_value(us_value):
-            """Encode microseconds range value to MSP format."""
-            return int((us_value - 900) / 25)
+    def _request_msp(self, message_name: str, data: Optional[list] = None, *, decode: bool) -> None:
+        """Send one MSP command and consume exactly its matching response."""
+        with self._msp_io_lock:
+            if not self._control.send_RAW_msg(MSPCodes[message_name], data=data or []):
+                raise ConnectionError(f"MSP command {message_name} was not sent")
+            response = self._control.receive_msg()
 
-        def find_mode_ranges(msp, mode_id, channel_index):
-            """Find mode range entries for mode and AUX channel."""
-            results = []
-            for i, mr in enumerate(msp.MODE_RANGES):
-                if (mr['id'] == mode_id and
-                    mr['auxChannelIndex'] == channel_index):
-                    results.append((i, mr))
-            return results
+            if response is None:
+                raise ConnectionError(f"MSP command {message_name} did not return a response")
+            if response.get("crcError") or response.get("packet_error"):
+                raise RuntimeError(f"MSP command {message_name} returned an invalid response")
 
-        def find_first_empty_range(msp):
-            """Find first unused mode range entry index."""
-            for i, mr in enumerate(msp.MODE_RANGES):
-                if mr['id'] == 0 and mr['range']['start'] == 900 and mr['range']['end'] == 900:
-                    return i
-            return None
+            if decode:
+                result = self._control.process_recv_data(response)
+                if result is None or result < 0:
+                    raise RuntimeError(f"MSP command {message_name} response was not decoded: {result}")
+
+    def add_range_for_althold(
+        self,
+        mode_id: int = _ALTHOLD_MODE_ID,
+        channel_index: int = _ALTHOLD_AUX_CHANNEL_INDEX,
+        range_start: int = _ALTHOLD_RANGE_START,
+        range_end: int = _ALTHOLD_RANGE_END,
+    ) -> bool:
+        """Ensure NAV ALTHOLD occupies AUX3 in the 1250–1350 µs range."""
+        def find_mode_ranges():
+            return [
+                (index, mode_range)
+                for index, mode_range in enumerate(self._control.MODE_RANGES)
+                if mode_range["id"] == mode_id
+                and mode_range["auxChannelIndex"] == channel_index
+            ]
 
         try:
-            self._control.send_RAW_msg(MSPCodes['MSP_MODE_RANGES'], data=[])
-            data_handler = self._control.receive_msg()
-            self._control.process_recv_data(data_handler)
-
+            self._request_msp("MSP_MODE_RANGES", decode=True)
             if not self._control.MODE_RANGES:
-                logger.warning("MODE_RANGES РїСѓСЃС‚!")
+                logger.warning("MSP_MODE_RANGES returned no configuration entries")
                 return False
 
-            existing = find_mode_ranges(self._control, mode_id, channel_index)
-            logger.info(f"РќР°Р№РґРµРЅРѕ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёС… РґРёР°РїР°Р·РѕРЅРѕРІ NAV ALTHOLD РЅР° CH{5 + channel_index}: {len(existing)}")
-            for idx, mr in existing:
-                logger.info(f"  [{idx}] {mr['range']['start']}-{mr['range']['end']}")
+            existing = find_mode_ranges()
+            if any(
+                mode_range["range"]["start"] == range_start
+                and mode_range["range"]["end"] == range_end
+                for _, mode_range in existing
+            ):
+                logger.info("NAV ALTHOLD range is already configured on AUX3")
+                return True
 
-            for _, mr in existing:
-                if mr['range']['start'] == range_start and mr['range']['end'] == range_end:
-                    logger.info(f"Р”РёР°РїР°Р·РѕРЅ {range_start}-{range_end} СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚!")
-                    return True
-
-            empty_index = find_first_empty_range(self._control)
+            empty_index = next(
+                (
+                    index
+                    for index, mode_range in enumerate(self._control.MODE_RANGES)
+                    if mode_range["id"] == 0
+                    and mode_range["range"] == {"start": 900, "end": 900}
+                ),
+                None,
+            )
             if empty_index is None:
-                logger.warning("РќРµС‚ СЃРІРѕР±РѕРґРЅС‹С… range entry! РњР°СЃСЃРёРІ РїРѕР»РЅРѕСЃС‚СЊСЋ Р·Р°РїРѕР»РЅРµРЅ.")
-                logger.warning(f"Р’СЃРµРіРѕ entries: {len(self._control.MODE_RANGES)}")
+                logger.warning("No free MSP mode-range entry is available for NAV ALTHOLD")
                 return False
-
-            logger.info(f"РЎРІРѕР±РѕРґРЅС‹Р№ range entry РЅР°Р№РґРµРЅ: index={empty_index}")
 
             payload = [
                 empty_index,
-                mode_id,                             # modeId NAV ALTHOLD
-                channel_index,                       # auxChannelIndex
-                encode_range_value(range_start),     # start encoded
-                encode_range_value(range_end),       # end encoded
+                mode_id,
+                channel_index,
+                (range_start - 900) // 25,
+                (range_end - 900) // 25,
             ]
+            self._request_msp("MSP_SET_MODE_RANGE", payload, decode=True)
+            self._request_msp("MSP_EEPROM_WRITE", decode=True)
+            self._request_msp("MSP_MODE_RANGES", decode=True)
 
-            logger.info(f"\nР”РѕР±Р°РІР»СЏСЋ РґРёР°РїР°Р·РѕРЅ: {range_start}-{range_end}")
-            logger.info(f"  rangeIndex     = {payload[0]}")
-            logger.info(f"  modeId         = {payload[1]} (NAV ALTHOLD)")
-            logger.info(f"  auxChannelIndex= {payload[2]} (CH{5 + payload[2]})")
-            logger.info(f"  start          = {range_start} (encoded: {payload[3]})")
-            logger.info(f"  end            = {range_end} (encoded: {payload[4]})")
-
-            self._control.send_RAW_msg(MSPCodes['MSP_SET_MODE_RANGE'], data=payload)
-            time.sleep(0.3)
-
-            logger.info("РЎРѕС…СЂР°РЅСЏСЋ РІ EEPROM...")
-            self._control.send_RAW_msg(MSPCodes['MSP_EEPROM_WRITE'], data=[])
-            time.sleep(0.5)
-
-            self._control.send_RAW_msg(MSPCodes['MSP_MODE_RANGES'], data=[])
-            data_handler = self._control.receive_msg()
-            self._control.process_recv_data(data_handler)
-
-            updated = find_mode_ranges(self._control, mode_id, channel_index)
-            logger.info(f"\nР’СЃРµ РґРёР°РїР°Р·РѕРЅС‹ NAV ALTHOLD РЅР° CH{5 + channel_index}:")
-            for idx, mr in updated:
-                logger.info(f"  [{idx}] {mr['range']['start']}-{mr['range']['end']}")
-
-            for _, mr in updated:
-                if mr['range']['start'] == range_start and mr['range']['end'] == range_end:
-                    logger.info("РЈРЎРџР•РҐ! РќРѕРІС‹Р№ РґРёР°РїР°Р·РѕРЅ РґРѕР±Р°РІР»РµРЅ!")
-                    return True
-
-            logger.warning("Р’РќРРњРђРќРР•: РґРёР°РїР°Р·РѕРЅ РЅРµ РїРѕСЏРІРёР»СЃСЏ РїРѕСЃР»Рµ СЃРѕС…СЂР°РЅРµРЅРёСЏ!")
-            return False
-
-        except Exception as e:
-            logger.error(f"РћС€РёР±РєР° РїСЂРё РґРѕР±Р°РІР»РµРЅРёРё РґРёР°РїР°Р·РѕРЅР° РґР»СЏ ALTHOLD: {e}")
+            configured = any(
+                mode_range["range"]["start"] == range_start
+                and mode_range["range"]["end"] == range_end
+                for _, mode_range in find_mode_ranges()
+            )
+            if configured:
+                logger.info("NAV ALTHOLD range configured: AUX3 = %s-%s", range_start, range_end)
+            else:
+                logger.error("NAV ALTHOLD range was not present after MSP EEPROM write")
+            return configured
+        except Exception as exc:
+            logger.error("Could not configure NAV ALTHOLD range: %s", exc)
             return False
 
     def altholdOn(self):
         """Enable NAV ALTHOLD channel value and unlock motors."""
+        if not self._althold_range_configured:
+            logger.warning("NAV ALTHOLD was requested but its MSP mode range is not configured")
+
+        self._poshold_flag = False
         self._althold_flag = True
-        self._nav_mode = 1300
+        self._nav_mode = self._ALTHOLD_AUX_VALUE
         self._base_throttle_hover = 1500
         self.unlock_motors()
+        self._send_rc_frame(self._current_rc_frame())
+        print("[info] NAV ALTHOLD enabled (AUX3 = 1300)")
 
     def altholdOff(self):
         """Disable NAV ALTHOLD channel value and lock motors."""

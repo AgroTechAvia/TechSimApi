@@ -77,6 +77,7 @@ class ArucoRecognizer:
                                                                                 #parameters = self.detector_parameters) #aruco.detectMarkers
         
         if markers_ids is not None:
+            aruco.drawDetectedMarkers(frame, markers_corners, markers_ids)
             '''rotation_vectors, translation_vectors, _ = aruco.estimatePoseSingleMarkers(corners = markers_corners, 
                                                                                        markerLength = self.marker_size, 
                                                                                        cameraMatrix = self.camera_matrix, 
@@ -127,6 +128,4 @@ class ArucoRecognizer:
             return frame_wit_axes, markers_ids, rotation_vectors, translation_vectors 
         
         else:
-        
             return None, None, None, None
-        

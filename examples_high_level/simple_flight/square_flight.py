@@ -10,7 +10,7 @@ port = "1233"
 
 def main():
 
-    client = HighLevelSimClient()
+    client = HighLevelSimClient(drone_name = "DEFAULT")
     # подключение
     client.connect(ip, port)
     # взлет

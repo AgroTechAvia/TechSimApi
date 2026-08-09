@@ -19,7 +19,7 @@ def main():
 
     time.sleep(2.0)
     # включаем пежим удержания позиции
-    client.posholdOn()
+    client.altholdOn()
 
     time.sleep(2.0)
     # взлет
@@ -53,7 +53,7 @@ def main():
 
     time.sleep(1)
 
-    client.posholdOff()
+    client.altholdOff()
 
     client.disconnect()
 

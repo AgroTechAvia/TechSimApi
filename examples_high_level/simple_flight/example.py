@@ -18,7 +18,7 @@ def main():
 
     time.sleep(2.0)
 
-    client.posholdOn()
+    client.altholdOn()
 
     time.sleep(2.0)
 

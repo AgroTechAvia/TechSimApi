@@ -14,7 +14,7 @@ import argparse
 
 # Импорт пользовательских модулей для распознавания ArUco маркеров
 from aruco_marker_recognizer import ArucoRecognizer
-from recognition_setting import aruco_dictionary, detector_parameters,marker_size,distance_coefficients,camera_matrix
+from agrotechsimapi import aruco_dictionary, detector_parameters,marker_size,distance_coefficients,camera_matrix
 
 # Глобальные переменные для управления мультикоптером
 # Массив значений RC каналов: [Roll, Pitch, Throttle, Yaw, Mode, Aux1, Aux2]

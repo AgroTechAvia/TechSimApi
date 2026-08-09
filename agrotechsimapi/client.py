@@ -75,6 +75,7 @@ class SimClient():
                                             unpack_encoding = 'utf-8')
 
         self.streaming = False
+        self.drone_name = None
     
     def __del__(self):
         self.close_connection()
@@ -111,6 +112,20 @@ class SimClient():
                     result = False
 
                 return result
+
+    def get_drone_name(self):
+        """Get the simulator owner name and cache it in ``drone_name``."""
+        drone_name = self.rpc_client.call('getName')
+        if isinstance(drone_name, bytes):
+            drone_name = drone_name.decode('utf-8')
+        if not isinstance(drone_name, str):
+            raise RuntimeError(
+                "Incompatible simulator RPC response: getName must return a string, "
+                f"got {type(drone_name).__name__}."
+            )
+
+        self.drone_name = drone_name
+        return self.drone_name
 
     '''def get_camera_capture(self, camera_id: int = 0, is_clear: bool = True, is_thermal: bool = False, is_depth: bool = False): 
 
@@ -156,7 +171,9 @@ class SimClient():
         """
         This function returns a data packet from the rotating lidar on the drone. 
         You can define the angle of view of the lidar (360 degrees by default) by angle_min and angle_max. 
-        If the distance is closer or farther than the specified values, the distance will be equal to zero. 
+        The simulator returns ``range_min`` (or zero) when a ray does not
+        intersect an obstacle; the client represents such readings as
+        ``range_max``.
  
         Args:
             angle_min (float): min angle range(degree)
@@ -171,14 +188,18 @@ class SimClient():
             ndarray : distances obtained from lidar scanning(meters)      
         """
         
-        laser_scan_data = self.rpc_client.call('getLaserScan', 
-                                                   angle_min, 
-                                                   angle_max, 
-                                                   range_min, 
-                                                   range_max, 
-                                                   num_ranges)
+        raw_laser_scan_data = self.rpc_client.call(
+            'getLaserScan',
+            angle_min,
+            angle_max,
+            range_min,
+            range_max,
+            num_ranges,
+        )
+        laser_scan_data = np.asarray(raw_laser_scan_data, dtype=float).reshape(-1)
+        laser_scan_data[laser_scan_data <= range_min] = range_max
         
-        if(is_clear == False and len(laser_scan_data) == num_ranges):
+        if not is_clear and len(laser_scan_data) == num_ranges:
             noise = np.random.normal(0, range_error, num_ranges)
             laser_scan_data += noise
 
@@ -195,9 +216,8 @@ class SimClient():
                         angle_error: float = 0.015):
         
         """
-        This function returns information about the nearest point that is within the radar coverage area. 
-        The coverage area has the shape of a cone sector. 
-        The point information returns in the format of distance and two angles.
+        This function returns the distance to the nearest point that is within
+        the radar coverage cone.
 
 
         Args:
@@ -207,28 +227,30 @@ class SimClient():
             range_max (float) : max range for scan distance(meters)
             is_clear (bool) : default True, if False is selected, noise will be generated
             range_error (float) : maximum error variation of distance(if is_clear is false)
-            angle_error (float) : maximum error variation for angles(if is_clear is false)
+            angle_error (float) : retained for backwards compatibility; the
+                                simulator returns no angle data
 
         Returns:
-            float : point distance(meters)
-            float : angle to a point in the horizontal plane(degree)
-            float : angle to a point in the vertical plane(degree)
+            float : point distance(meters). A negative value means that no
+                    point was detected.
         """
         
-        radar_point = self.rpc_client.call('getRadarData',
-                                           radar_id,
-                                           base_angle,
-                                           range_min,
-                                           range_max)
-        
-        radar_point[1] = -radar_point[1]
+        raw_radar_point = self.rpc_client.call('getRadarData',
+                                               radar_id,
+                                               base_angle,
+                                               range_min,
+                                               range_max)
 
-        if(is_clear == False):
-            range_noise = np.random.normal(0,range_error,1)
-            radar_point[0] += range_noise
+        if not np.isscalar(raw_radar_point):
+            raise RuntimeError(
+                "Incompatible simulator RPC response: getRadarData must return "
+                f"a single distance value, got {raw_radar_point!r}."
+            )
 
-            angle_noise = np.random.normal(0,angle_error,2)
-            radar_point[1:] += angle_noise 
+        radar_point = float(raw_radar_point)
+
+        if not is_clear:
+            radar_point += float(np.random.normal(0, range_error))
 
         return radar_point
     
