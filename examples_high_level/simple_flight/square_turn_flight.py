@@ -18,7 +18,7 @@ def main():
     client.armDrone()
 
     time.sleep(2.0)
-    # включаем пежим удержания позиции
+    # Enable NAV ALTHOLD after the verified ARM sequence.
     client.altholdOn()
 
     time.sleep(2.0)
@@ -61,4 +61,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -1,5 +1,11 @@
 import numpy as np
 
+
+def _identity_processing(value):
+    """Return an unmodified PID output when no post-processing is configured."""
+    return value
+
+
 class PID:
     """
     PID-регулятор с опциональной экспоненциальной зависимостью.
@@ -12,7 +18,7 @@ class PID:
         exp_factor: Показатель степени для экспоненциальной зависимости (по умолчанию 2.0)
     """
     def __init__(self, kp, ki, kd, max_control=float('inf'), i_limit=None, 
-                 is_exp=False, exp_factor=1.0, processing_func = lambda x:x*1):
+                 is_exp=False, exp_factor=1.0, processing_func=_identity_processing):
         self.kp = kp
         self.ki = ki
         self.kd = kd
@@ -24,6 +30,10 @@ class PID:
         # Параметры для экспоненциальной зависимости
         self.is_exp = is_exp
         self.exp_factor = exp_factor
+        if processing_func is None:
+            processing_func = _identity_processing
+        elif not callable(processing_func):
+            raise TypeError("processing_func must be callable or None")
         self._processing_func = processing_func
 
         self.current_error = 0.0

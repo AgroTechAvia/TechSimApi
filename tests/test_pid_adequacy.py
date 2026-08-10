@@ -12,6 +12,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from agrotechsimapi.pid import PID
 
 
+def test_pid_uses_identity_processing_when_none_is_configured():
+    pid = PID(kp=1.0, ki=0.0, kd=0.0, processing_func=None)
+
+    pid.update_control(1.25)
+
+    assert pid.get_control() == 1.25
+
+
 class TestCurrentPIDCoefficients(unittest.TestCase):
     """Тесты текущих коэффициентов PID регуляторов"""
 
