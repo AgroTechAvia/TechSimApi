@@ -1,185 +1,496 @@
-# AgroTechSim API
+﻿# AgroTechSim API
 
-Python API для симулятора AgroTechSim. Пакет предоставляет низкоуровневый
-доступ к сенсорам и событиям симулятора, а также высокоуровневое автономное
-управление с каскадом **положение → скорость → ускорение → PWM**.
+![AgroTechSim API](https://raw.githubusercontent.com/AgroTechAvia/TechSimApi/main/img/header.png)
+[Русский](#русский) | [English](#english)
 
-- Python 3.10+
-- установка из PyPI или исходников
-- Windows и Linux
-- именованные PID-калибровки с импортом и экспортом
-- встроенная автоматическая калибровка и автономные HTML-отчёты
+---
 
-## Установка
+## Русский
 
-Из PyPI:
+### 🚀 Описание
+
+**AgroTechSim API** — это Python-библиотека для работы с симулятором AgroTechSim, предназначенная для получения телеметрии с дронов, обработки сенсорных данных и реализации систем автономного управления. Библиотека предоставляет как низкоуровневый доступ к сырым данным сенсоров, так и высокоуровневые абстракции для упрощённого управления дроном.
+
+Модуль позволяет разработчикам создавать сложные алгоритмы компьютерного зрения, навигации и управления без необходимости работы с реальным оборудованием, используя полнофункциональный симулятор дронов.
+
+### 📊 Совместимость
+
+| Компонент | Версия | Статус |
+|-----------|--------|--------|
+| **AgroTechSim API** | 1.0.1-v1.0.2 | ✅ Compatible with AgroTechSim 1.0.3 |
+| **AgroTechSim API** | 1.0.3 | ✅ Compatible with AgroTechSim 1.0.4-1.0.5 |
+| **Python** | 3.10 | ✅ Recommended |
+| **InavMSPApi** | 1.1.0 | ✅ Dependency |
+
+### ⚡ Установка
+
+#### Вариант 1: Установка из PyPi (рекомендуется)
 
 ```bash
-python -m pip install agrotechsimapi
+pip install agrotechsimapi
 ```
 
-Из локального репозитория:
+Этот способ автоматически установит все зависимости, включая `inavmspapi` требуемой версии.
+
+#### Вариант 2: Установка из исходников
+
+1. Клонируйте репозиторий:
+```bash
+git clone https://github.com/AgroTechAvia/TechSimApi.git
+cd TechSimApi
+```
+
+2. Запустите скрипт установки:
+```bash
+python setup_by_source.py
+```
+
+Скрипт автоматически установит все зависимости и настроит окружение.
+
+#### Вариант 3: Ручная установка (для разработчиков)
 
 ```bash
-python -m pip install .
+# 1. Создайте виртуальное окружение
+python -m venv .venv
+
+# 2. Активируйте окружение
+# Windows:
+.venv\Scripts\activate
+# Linux/Mac:
+source .venv/bin/activate
+
+# 3. Установите inavmspapi
+git clone https://github.com/AgroTechAvia/InavMSPApi.git
+cd InavMSPApi
+git checkout v1.1.0
+pip install .
+
+# 4. Установите agrotechsimapi
+cd ..
+git clone https://github.com/AgroTechAvia/TechSimApi.git
+cd TechSimApi
+pip install .
 ```
 
-Для разработки без повторной установки после каждого изменения:
+### 🎯 Функционал
 
-```bash
-python -m pip install -e .
-```
+#### Низкоуровневый API (`SimClient`)
+- 📷 **Камеры**: Получение цветных, тепловизионных, глубинных и спектральных изображений
+- 📡 **Лидар**: 360° сканирование окружения с настраиваемыми параметрами
+- 🎯 **Радар**: Обнаружение ближайших объектов с угловыми координатами
+- 📏 **Дальномер**: Точечное измерение расстояния
+- 💡 **LED управление**: Контроль подсветки дрона
+- 📊 **Кинематика**: Получение позиции, ориентации и скорости дрона
 
-## Низкоуровневый клиент
+#### Высокоуровневый API (`HighLevelSimClient`)
+- 🚁 **Управление полётом**: Взлёт, посадка, удержание высоты
+- 🧭 **Навигация**: Движение к координатам в разных системах отсчёта
+- 🎯 **Стабилизация**: PID-регуляторы для автоматического удержания позиции
+- 👁️ **Обработка изображений**: Детектирование ArUco маркеров и blob-объектов
+- 🔄 **Одометрия**: Отслеживание перемещения относительно начальной точки
+- **Обновление автономного полета**: Пакет содержит именованные PID-профили и встроенный калибратор. Готовые пресеты `edu-ext`, `edu-constructor` и `edu` можно выбрать при создании клиента; отдельные регуляторы по-прежнему можно переопределять вручную.
 
-`SimClient` работает с RPC-интерфейсом симулятора: камерами, кинематикой,
-лидаром, радаром, дальномером, LED и событиями.
+### 📁 Примеры использования
+
+В репозитории представлены готовые примеры:
+
+#### `examples_low_level/` - Низкоуровневые примеры
+
+#### `examples_high_level/` - Высокоуровневые примеры
+
+
+### 🚀 Быстрый старт
 
 ```python
-from agrotechsimapi import SimClient
+from agrotechsimapi import SimClient, CaptureType
+import cv2
 
+# Подключение к симулятору
 client = SimClient(address="127.0.0.1", port=8080)
-kinematics = client.get_kinametics_data()
 
-print("position:", kinematics["location"])
-print("velocity:", kinematics["linear_velocity"])
+# Получение изображения с камеры
+image = client.get_camera_capture(camera_id=0, type=CaptureType.color)
 
-client.close_connection()
+# Отображение изображения
+cv2.imshow("Drone Camera", image)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
 ```
 
-Примеры находятся в [`examples_low_level`](examples_low_level/).
+### 🎛️ Калибровка автономного полёта
 
-## Высокоуровневый клиент
-
-`HighLevelSimClient` и `HighLevelClient` являются именами одного класса. Клиент
-использует MSP TCP на порту `5762` и RPC симулятора на порту `8080`.
+По умолчанию `HighLevelSimClient` использует встроенный профиль `edu-ext`.
+Профиль можно выбрать по имени:
 
 ```python
-import math
 from agrotechsimapi import HighLevelSimClient
 
 client = HighLevelSimClient(calibration="edu")
-client.connect("127.0.0.1", 5762, sim_port=8080)
-
-client.armDrone()
-client.altholdOn()
-client.takeoff()
-
-client.gotoXYdrone(2.0, 0.0)
-client.setYaw(math.radians(90))  # setYaw принимает радианы
-client.gotoXYdrone(1.0, 0.0)
-
-client.boarding()
-client.disarmDrone()
-client.disconnect()
 ```
 
-Примеры находятся в [`examples_high_level`](examples_high_level/).
-
-## Встроенные калибровки
-
-Пакет поставляется с тремя пресетами только для чтения:
-
-| Имя | Назначение |
-|---|---|
-| `edu-ext` | пресет по умолчанию |
-| `edu-constructor` | стандартный пресет EDU Constructor |
-| `edu` | стандартный пресет EDU |
-
-Старое имя `default` поддерживается как скрытый псевдоним `edu-ext`.
-
-```python
-from agrotechsimapi import HighLevelClient
-
-default_drone = HighLevelClient()  # edu-ext
-edu_drone = HighLevelClient(calibration="edu")
-custom_drone = HighLevelClient(calibration="my_drone")
-file_drone = HighLevelClient(calibration_path="exported_calibration.json")
-```
-
-Посмотреть доступные калибровки:
+Посмотреть доступные профили и создать конфигурацию новой калибровки:
 
 ```bash
 python -m agrotechsimapi calibrations list
-python -m agrotechsimapi calibrations show edu
+python -m agrotechsimapi calibrations init-config --output calibration.json
 ```
 
-## Автоматическая калибровка
-
-Создайте конфигурацию, проверьте план и затем запустите полёт:
+Сначала рекомендуется проверить план без подключения к симулятору, а затем
+запустить полёт с `--fly`:
 
 ```bash
-python -m agrotechsimapi calibrations init-config --output calibration.json
 python -m agrotechsimapi calibrate --name my_drone --config calibration.json
 python -m agrotechsimapi calibrate --name my_drone --config calibration.json --fly
 ```
 
-Калибровка последовательно настраивает высоту, yaw, ускорение XY, скорость XY и
-положение XY. Готовый профиль сохраняется в пользовательском каталоге данных и
-становится доступен по имени в `HighLevelClient`.
-
-Полная практическая инструкция:
-
-- [Запуск калибровки, графики и перенос профилей](docs/calibration_guide.md)
-- [Техническое описание алгоритмов и хранилища](docs/calibration.md)
-
-## Графики
-
-Графики завершённой калибровки:
-
-```bash
-python -m agrotechsimapi plot --calibration my_drone --open
-```
-
-Одноразовый снимок текущего запуска:
+Калибратор последовательно настраивает высоту, yaw, ускорение XY, скорость XY и
+положение XY. Посмотреть текущий запуск или готовый профиль можно в автономном
+HTML-отчёте:
 
 ```bash
 python -m agrotechsimapi plot --current --last 8 --open
+python -m agrotechsimapi plot --calibration my_drone --open
 ```
 
-Отчёт является автономным HTML-файлом с вкладками высоты, yaw, ускорения,
-скорости и положения, а также переключателем русского и английского языка.
-
-## Импорт и экспорт
+Профили можно переносить между окружениями:
 
 ```bash
 python -m agrotechsimapi calibrations export my_drone --output my_drone.json
 python -m agrotechsimapi calibrations import my_drone.json --name imported_drone
 ```
 
-Пользовательское хранилище расположено в `%LOCALAPPDATA%\agrotechsimapi` на
-Windows, `$XDG_DATA_HOME/agrotechsimapi` или `~/.local/share/agrotechsimapi` на
-Linux и `~/Library/Application Support/agrotechsimapi` на macOS.
+Подробности находятся в [практической инструкции](docs/calibration_guide.md) и
+[техническом описании](docs/calibration.md).
 
-## Проверка исходников
+### 🧪 Тестирование работоспособности
+
+Для проверки корректной работы модуля с симулятором используйте интеграционные тесты. Файл `test_sim_client_real.py` содержит тесты, которые проверяют подключение к симулятору и работу всех основных функций.
+
+#### 📋 Предварительные требования:
+1. **Запущенный симулятор AgroTechSim**
+2. **Дрон появился** в симуляторе
+3. **Установлен Python 3.10+** и необходимые зависимости
+
+#### 🚀 Запуск тестов:
 
 ```bash
-python -m pytest -q tests utils/test_auto_calibration_tool.py
-python -m pip wheel . --no-deps
+# Перейдите в директорию проекта
+cd TechSimApi
+
+# Запустите тесты с симулятором
+pytest test/test_sim_client_real.py --with-simulator -v
 ```
+
+#### 📊 Что проверяют тесты:
+
+Тест `test_sim_client_real.py` последовательно проверяет:
+
+1. **✅ Подключение к симулятору** - проверка соединения
+2. **✅ Получение изображений с камер** - цветная, тепловизионная, глубинная камеры
+3. **✅ Кинематические данные** - позиция и ориентация дрона
+4. **✅ Данные дальномера** - измерение расстояния
+5. **✅ Сканирование лидаром** - 360° сканирование окружения
+6. **✅ Радар** - обнаружение ближайших объектов
+7. **✅ Управление LED** - включение/выключение подсветки
+8. **✅ Обработка изображений** - добавление шума и артефактов
+9. **✅ Несколько камер** - работа с разными ID камер
+10. **✅ Обработка ошибок** - корректная реакция на невалидные параметры
+11. **✅ Производительность** - время отклика основных функций
+
+#### ⚠️ Важные замечания по тестированию:
+
+- **Симулятор должен быть запущен** перед запуском тестов
+- **Тесты могут пропускаться**, если определенный сенсор не доступен в текущей конфигурации симулятора
+- **Первые измерения лидара и радара** могут быть некорректными (особенность симулятора)
+- **Для ручной проверки** можно использовать скрипт:
+
+
+#### 🔧 Пример вывода успешного тестирования:
+
+```
+============================================================
+Running SimClient Integration Tests with Real Simulator
+============================================================
+
+test_connection: ✓ PASSED
+test_get_camera_capture: ✓ PASSED
+test_get_kinematics_data: ✓ PASSED
+test_get_range_data: ✓ PASSED
+test_get_laser_scan: ✓ PASSED
+test_get_radar_point: ⚠ SKIPPED (Radar not available)
+test_led_control: ✓ PASSED
+test_image_processing_methods: ✓ PASSED
+test_multiple_camera_ids: ✓ PASSED
+test_call_event_action: ✓ PASSED
+test_error_handling: ✓ PASSED
+test_performance: ✓ PASSED
+
+✅ Все основные функции работают корректно!
+```
+
+#### 🐛 Если тесты не проходят:
+
+1. **Проверьте подключение к симулятору:**
+```python
+from agrotechsimapi import SimClient
+client = SimClient()
+print(f"Connected: {client.is_connected()}")
+```
+
+2. **Убедитесь, что порт 8080 открыт:**
+```bash
+# Linux/Mac
+nc -z localhost 8080
+# Windows
+Test-NetConnection -ComputerName localhost -Port 8080
+```
+
+3. **Проверьте, что дрон заспавнен в симуляторе**
+
+Тестирование позволяет убедиться, что все компоненты модуля работают корректно с текущей версией симулятора.
+
+---
 
 ## English
 
-AgroTechSim API provides low-level simulator access and calibrated autonomous
-flight control for Python 3.10+. Install it with:
+### 🚀 Description
+
+**AgroTechSim API** is a Python library for working with the AgroTechSim simulator, designed for obtaining drone telemetry, processing sensor data, and implementing autonomous control systems. The library provides both low-level access to raw sensor data and high-level abstractions for simplified drone control.
+
+The module enables developers to create complex computer vision, navigation, and control algorithms without the need for real hardware, using a full-featured drone simulator.
+
+### 📊 Compatibility
+
+| Component | Version | Status |
+|-----------|---------|--------|
+| **AgroTechSim API** | 1.0.1-v1.0.2 | ✅ Works with AgroTechSim 1.0.3 |
+| **AgroTechSim API** | 1.0.3 | ✅ Works with AgroTechSim 1.0.4-1.0.5 |
+| **Python** | 3.10 | ✅ Recommended |
+| **InavMSPApi** | 1.1.0 | ✅ Dependency |
+
+### ⚡ Installation
+
+#### Option 1: Install from PyPi (recommended)
 
 ```bash
-python -m pip install agrotechsimapi
+pip install agrotechsimapi
 ```
 
-The high-level client uses a position → velocity → acceleration → PWM control
-cascade. Select one of the bundled profiles with
-`HighLevelClient(calibration="edu")`, or run a named calibration with:
+This method will automatically install all dependencies, including the required version of `inavmspapi`.
+
+#### Option 2: Install from source
+
+1. Clone the repository:
+```bash
+git https://github.com/AgroTechAvia/TechSimApi.git
+cd TechSimApi
+```
+
+2. Run the installation script:
+```bash
+python setup_by_source.py
+```
+
+The script will automatically install all dependencies and set up the environment.
+
+#### Option 3: Manual installation (for developers)
 
 ```bash
+# 1. Create a virtual environment
+python -m venv .venv
+
+# 2. Activate the environment
+# Windows:
+.venv\Scripts\activate
+# Linux/Mac:
+source .venv/bin/activate
+
+# 3. Install inavmspapi
+git clone https://github.com/AgroTechAvia/InavMSPApi.git
+cd InavMSPApi
+git checkout v1.1.0
+pip install .
+
+# 4. Install agrotechsimapi
+cd ..
+git clone https://github.com/AgroTechAvia/TechSimApi.git
+cd TechSimApi
+pip install .
+```
+
+### 🎯 Features
+
+#### Low-Level API (`SimClient`)
+- 📷 **Cameras**: Capture color, thermal, depth, and spectral images
+- 📡 **Lidar**: 360° environment scanning with configurable parameters
+- 🎯 **Radar**: Nearest object detection with angular coordinates
+- 📏 **Rangefinder**: Point distance measurement
+- 💡 **LED Control**: Drone lighting control
+- 📊 **Kinematics**: Get drone position, orientation, and velocity
+
+#### High-Level API (`HighLevelSimClient`)
+- 🚁 **Flight Control**: Takeoff, landing, altitude hold
+- 🧭 **Navigation**: Movement to coordinates in different reference frames
+- 🎯 **Stabilization**: PID controllers for automatic position hold
+- 👁️ **Image Processing**: ArUco marker and blob object detection
+- 🔄 **Odometry**: Track movement relative to starting point
+- **Autonomous flight update**: The package provides named PID profiles and a built-in calibration workflow. Select `edu-ext`, `edu-constructor`, or `edu` when creating the client; individual controllers can still be overridden manually.
+
+### 📁 Usage Examples
+
+The repository includes ready-to-use examples:
+
+#### `examples_low_level/` - Low-level examples
+
+#### `examples_high_level/` - High-level examples
+
+### 🚀 Quick Start
+
+```python
+from agrotechsimapi import SimClient, CaptureType
+import cv2
+
+# Connect to simulator
+client = SimClient(address="127.0.0.1", port=8080)
+
+# Get camera image
+image = client.get_camera_capture(camera_id=0, type=CaptureType.color)
+
+# Display image
+cv2.imshow("Drone Camera", image)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
+```
+
+### 🎛️ Autonomous Flight Calibration
+
+`HighLevelSimClient` uses the bundled `edu-ext` profile by default. Select a
+different profile by name:
+
+```python
+from agrotechsimapi import HighLevelSimClient
+
+client = HighLevelSimClient(calibration="edu")
+```
+
+List available profiles and create an editable calibration configuration:
+
+```bash
+python -m agrotechsimapi calibrations list
 python -m agrotechsimapi calibrations init-config --output calibration.json
+```
+
+Preview the plan first, then add `--fly` to connect to the simulator:
+
+```bash
+python -m agrotechsimapi calibrate --name my_drone --config calibration.json
 python -m agrotechsimapi calibrate --name my_drone --config calibration.json --fly
+```
+
+The workflow tunes altitude, yaw, XY acceleration, XY velocity and XY position
+in sequence. Generate a one-time HTML snapshot of the active run or a completed
+profile with:
+
+```bash
+python -m agrotechsimapi plot --current --last 8 --open
 python -m agrotechsimapi plot --calibration my_drone --lang en --open
 ```
 
-See the [calibration guide](docs/calibration_guide.md) and the
-[technical calibration reference](docs/calibration.md) for details.
+Export and import profiles between environments or computers:
 
-## License
+```bash
+python -m agrotechsimapi calibrations export my_drone --output my_drone.json
+python -m agrotechsimapi calibrations import my_drone.json --name imported_drone
+```
 
-Apache-2.0.
+See the [practical calibration guide](docs/calibration_guide.md) and the
+[technical reference](docs/calibration.md) for details.
+
+### 🧪 Functionality Testing
+
+To verify that the module works correctly with the simulator, use the integration tests. The `test_sim_client_real.py` file contains tests that check the connection to the simulator and the operation of all main functions.
+
+#### 📋 Prerequisites:
+1. **Running AgroTechSim simulator** on `localhost:8080`
+2. **Drone spawned** in the simulator
+3. **Python 3.10+ installed** with necessary dependencies
+
+#### 🚀 Running tests:
+
+```bash
+# Go to the project directory
+cd TechSimApi
+
+# Run tests with simulator
+pytest tests/test_sim_client_real.py --with-simulator -v
+```
+
+#### 📊 What the tests check:
+
+The `test_sim_client_real.py` test sequentially verifies:
+
+1. **✅ Connection to simulator** - connection check
+2. **✅ Camera image capture** - color, thermal, depth cameras
+3. **✅ Kinematic data** - drone position and orientation
+4. **✅ Rangefinder data** - distance measurement
+5. **✅ Lidar scanning** - 360° environment scanning
+6. **✅ Radar** - nearest object detection
+7. **✅ LED control** - turning lights on/off
+8. **✅ Image processing** - adding noise and artifacts
+9. **✅ Multiple cameras** - working with different camera IDs
+10. **✅ Error handling** - correct response to invalid parameters
+11. **✅ Performance** - response time of main functions
+
+#### ⚠️ Important testing notes:
+
+- **Simulator must be running** before starting tests
+- **Tests may be skipped** if a particular sensor is not available in the current simulator configuration
+- **First lidar and radar measurements** may be incorrect (simulator feature)
+- **For manual checking** you can use the script:
+
+
+#### 🔧 Example of successful test output:
+
+```
+============================================================
+Running SimClient Integration Tests with Real Simulator
+============================================================
+
+test_connection: ✓ PASSED
+test_get_camera_capture: ✓ PASSED
+test_get_kinematics_data: ✓ PASSED
+test_get_range_data: ✓ PASSED
+test_get_laser_scan: ✓ PASSED
+test_get_radar_point: ⚠ SKIPPED (Radar not available)
+test_led_control: ✓ PASSED
+test_image_processing_methods: ✓ PASSED
+test_multiple_camera_ids: ✓ PASSED
+test_call_event_action: ✓ PASSED
+test_error_handling: ✓ PASSED
+test_performance: ✓ PASSED
+
+✅ All main functions work correctly!
+```
+
+#### 🐛 If tests fail:
+
+1. **Check connection to simulator:**
+```python
+from agrotechsimapi import SimClient
+client = SimClient()
+print(f"Connected: {client.is_connected()}")
+```
+
+2. **Make sure port 8080 is open:**
+```bash
+# Linux/Mac
+nc -z localhost 8080
+# Windows
+Test-NetConnection -ComputerName localhost -Port 8080
+```
+
+3. **Verify that drone is spawned in simulator**
+
+Testing allows you to ensure that all module components work correctly with the current simulator version.
+
+---
