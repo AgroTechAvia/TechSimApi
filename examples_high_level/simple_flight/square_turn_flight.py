@@ -20,7 +20,7 @@ def print_drone_position(client):
 
 def main():
 
-    client = HighLevelSimClient(calibration="edu")
+    client = HighLevelSimClient()
 
      # подключение
     client.connect(ip, port)
