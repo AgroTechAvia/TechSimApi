@@ -13,6 +13,19 @@ from inavmspapi.msp_codes import MSPCodes
 def get_spectrum_name_split(capture_type):
     return capture_type.name.split('_')[-1]
 
+def parse_capture_type(value):
+    """Accept CLI names such as spectrum_NIR and numeric enum values."""
+    try:
+        return CaptureType[value]
+    except KeyError:
+        try:
+            return CaptureType(int(value))
+        except (ValueError, TypeError) as exc:
+            choices = ", ".join(item.name for item in CaptureType)
+            raise argparse.ArgumentTypeError(
+                f"unknown capture type {value!r}; choose one of: {choices}"
+            ) from exc
+
 def create_unique_folder(base_folder):
     folder = base_folder
     counter = 1
@@ -47,11 +60,10 @@ def capture_and_save_image(client, camera_id, Capture_Type, folder, image_prefix
         print(f"Сохранено изображение: {file_path}")
         return None
 
-def main(folder_name, capture_frequency, capture_types, image_prefix, camera_num, capture_horizontal_speed):
+def main(folder_name, capture_frequency, capture_types, image_prefix, camera_num,
+         capture_horizontal_speed, inav_host, inav_port):
 
-    HOST = args.inav_host
-    PORT = args.inav_port
-    ADDRESS = (HOST, PORT)
+    ADDRESS = (inav_host, inav_port)
 
     tcp_transmitter = TCPTransmitter(ADDRESS)
     tcp_transmitter.connect()
@@ -69,7 +81,7 @@ def main(folder_name, capture_frequency, capture_types, image_prefix, camera_num
     control.receive_msg()
     time.sleep(0.5)
     
-    control.send_RAW_RC([100, 1000, 1000, 1000, 2000, 1000, 1000])
+    control.send_RAW_RC([1000, 1000, 1000, 1000, 2000, 1000, 1000])
     control.receive_msg()
     time.sleep(0.1)
     
@@ -85,7 +97,8 @@ def main(folder_name, capture_frequency, capture_types, image_prefix, camera_num
         try:
             kinematic_result = client.get_kinametics_data()
             vx, vy, vz = kinematic_result['linear_velocity']
-            speed_magnitude_horizontal = math.sqrt((vx * 100)**2 + (vy * 100)**2)
+            # linear_velocity is already returned in metres per second.
+            speed_magnitude_horizontal = math.hypot(vx, vy)
             if speed_magnitude_horizontal > capture_horizontal_speed:
                 for capture_type in capture_types:
                     capture_and_save_image(client, camera_id=camera_num, Capture_Type=capture_type, folder=subfolders[capture_type], image_prefix=image_prefix)
@@ -101,7 +114,7 @@ if __name__ == "__main__":
     parser.add_argument('--folder_name', type=str, default="Fields", help='Base folder name')
     parser.add_argument('--file_prefix', type=str, default="Img", help='Image name prefix')
     parser.add_argument('--frequency', type=float, default=1, help='Capture frequency in seconds')
-    parser.add_argument('--capture_types', type=CaptureType, nargs='+', default=[CaptureType.spectrum_NIR, CaptureType.spectrum_R], help='List of capture types')
+    parser.add_argument('--capture_types', type=parse_capture_type, nargs='+', default=[CaptureType.spectrum_NIR, CaptureType.spectrum_R], help='List of capture types')
     parser.add_argument('--camera_num', type=int, default=1, help='Camera number: 0(front)/1(bottom)/2(back)')
     parser.add_argument('--horizontal_speed', type=float, default=0.5, help='Minimum capture horizontal speed')
     parser.add_argument('--inav_host', type=str, default='127.0.0.1')
@@ -115,5 +128,7 @@ if __name__ == "__main__":
         capture_types=args.capture_types,
         image_prefix=args.file_prefix,
         camera_num=args.camera_num,
-        capture_horizontal_speed=args.horizontal_speed
+        capture_horizontal_speed=args.horizontal_speed,
+        inav_host=args.inav_host,
+        inav_port=args.inav_port,
     )

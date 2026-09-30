@@ -5,7 +5,7 @@ import time
 import math
 
 ip = '127.0.0.1'
-port = "1233"
+port = 5762
 
 
 def main():
@@ -14,6 +14,7 @@ def main():
     # подключение
     client.connect(ip, port)
     # взлет
+    client.armDrone()
     client.takeoff()
     # устанавливаем целевую высоту
     client.setHeight(1.5) 

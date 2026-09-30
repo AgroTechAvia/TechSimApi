@@ -10,7 +10,7 @@ import cv2
 
 # Задаем IP и порт для подключения к дрону
 ip = "127.0.0.1"
-port = "1233"
+port = 5762
 
 # Переменная для хранения времени последнего сообщения
 last_time = None
@@ -19,11 +19,12 @@ def find_marker(speed_roll):
     while True:
         error = client.getArucos()
         image = client.getArucosImage()
-        cv2.imshow("blob", image)
-        cv2.waitKey(1)
+        if image is not None:
+            cv2.imshow("blob", image)
+            cv2.waitKey(1)
         client.setVelXYYaw(0, speed_roll, 0)
         if error:
-            client.setDiod(0, 255, 0)
+            client.setDiod(0, 0, 255, 0)
             print('маркер найден')
             client.setVelXYYaw(0, 0, 0)
             time.sleep(1)
@@ -51,7 +52,7 @@ def Aruco_boarding():
     
     # Устанавливаем время выполнения, по истечению которого дрон совершит посадку 
     while delta_time.total_seconds() < 200:
-        if delta_time.total_seconds == 200:
+        if delta_time.total_seconds() >= 200:
             print('время')
         try:
             # Обновляем текущее время и рассчитываем время выполнения
@@ -69,8 +70,9 @@ def Aruco_boarding():
                 continue
             if errors:
                 image = client.getArucosImage()
-                cv2.imshow("blob", image)
-                cv2.waitKey(1)
+                if image is not None:
+                    cv2.imshow("blob", image)
+                    cv2.waitKey(1)
                 # Если камера видит аруко-маркеры, записываем в переменные ошибки
                 roll_error = errors[0]['pose']['position']['x']
                 pitch_error = errors[0]['pose']['position']['y'] - 0.09
@@ -133,15 +135,25 @@ def constrain(value, threshold):
 # Функция обработки входящих сообщений
 
 
-# Создаем объект клиента для взаимодействия с дроном
-client = HighLevelSimClient()
+client = None
 
-# Подключаемся к дрону и выполняем команды
-print("connected?", client.connect(ip, port), "\n")
-print("VelCorrect", client.setVelXY(0, 0), "\n")
-print("takeoff?", client.takeoff(), "\n")
-time.sleep(7)
-print("Aruco Boarding: ", find_marker(0.25), "\n")
-print("Aruco Boarding: ", Aruco_boarding(), "\n")
-print("boarding?", client.boarding(), "\n")
-print("disconnected?", client.disconnect(), "\n")
+
+def main():
+    global client
+    client = HighLevelSimClient()
+    client.connect(ip, port)
+    client.setVelXY(0, 0)
+    client.armDrone()
+    client.takeoff()
+    time.sleep(7)
+    try:
+        find_marker(0.25)
+        Aruco_boarding()
+    finally:
+        client.boarding()
+        client.disconnect()
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()

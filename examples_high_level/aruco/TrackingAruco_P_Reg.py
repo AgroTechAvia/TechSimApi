@@ -3,7 +3,7 @@ from agrotechsimapi import HighLevelSimClient
 import time
 
 ip = "127.0.0.1"
-port = "1233"
+port = 5762
 
 # Функция поиска маркера
 def search_aruco (yaw_vel):
@@ -61,31 +61,26 @@ def constrain (value, threshold):
     return value
 
 
-client = HighLevelSimClient()
+client = None
 
-# Подключаемся
-client.connect(ip, port)
 
-# Сбрасываем скорости
-client.setVelXYYaw(0, 0, 0)
+def main():
+    global client
+    client = HighLevelSimClient()
+    client.connect(ip, port)
+    client.setVelXYYaw(0, 0, 0)
+    client.armDrone()
+    client.altholdOn()
+    client.takeoff()
+    client.setHeight(1.5)
+    time.sleep(7)
+    try:
+        search_aruco(0.5)
+        tracking_aruco()
+    finally:
+        client.boarding()
+        client.disconnect()
 
-client.armDrone()
 
-time.sleep(2.0)
-
-client.altholdOn()
-
-time.sleep(2.0)
-
-# Взлет
-client.takeoff()
-
-client.setHeight(1.5)
-
-time.sleep(7)
-
-# Ищем маркер
-search_aruco(0.5)
-
-# Выравнивание относительно маркера
-tracking_aruco()
+if __name__ == "__main__":
+    main()

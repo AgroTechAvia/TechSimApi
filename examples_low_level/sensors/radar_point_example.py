@@ -24,8 +24,8 @@ def main(args):
         # angle_error - сохранён для обратной совместимости; сервер не возвращает углы
         result = client.get_radar_point(radar_id=args.radar_num,base_angle=45, range_min=0.0, range_max=2.0,is_clear=True,range_error=0.15,angle_error=0.015)
         
-        # Вывод расстояния до ближайшей точки; отрицательное значение означает отсутствие цели
-        if result < 0:
+        # Сервер возвращает 0, если цель в заданном диапазоне не найдена.
+        if result <= 0:
             print("No target detected")
         else:
             print(f"Distance: {result:.3f} m")

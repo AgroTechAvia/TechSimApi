@@ -7,7 +7,7 @@ import time
 import math
 
 ip = '127.0.0.1'
-port = "1233"
+port = 5762
 
 
 BLOBS_DICT = {0: "Красный", 1: "Зеленый", 2: "Синий"}
@@ -37,8 +37,9 @@ def main():
         while True:
             blobs = client.getBlobs()
             image = client.getBlobsImage()
-            cv2.imshow("blob", image)
-            cv2.waitKey(1)
+            if image is not None:
+                cv2.imshow("blob", image)
+                cv2.waitKey(1)
             print(f"Количество блобов на картинке: {len(blobs)}")
             i = 0
             for blob in blobs:
@@ -50,22 +51,13 @@ def main():
             print("-" * 20)
             
             time.sleep(0.1)
-    except KeyboardInterrupt as err:
+    except KeyboardInterrupt:
         client.setVelXYYaw(0, 0, 0)
         print(f"Остановка поиска блобов")
-
-
-    client.boarding()
-
-    time.sleep(1)
-
-    client.disarmDrone()
-
-    time.sleep(1)
-
-    client.altholdOff()
-
-    client.disconnect()
+    finally:
+        client.boarding()
+        client.disconnect()
+        cv2.destroyAllWindows()
 
 
 

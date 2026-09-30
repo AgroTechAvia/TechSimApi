@@ -4,7 +4,7 @@ from agrotechsimapi import HighLevelSimClient
 import time
 
 ip = "127.0.0.1"
-port = "1233"
+port = 5762
 
 def wall_follow():
     distance = 0.5
@@ -17,9 +17,9 @@ def wall_follow():
         # print('pitch_error', pitch_error)
 
         if distance_to_wall > distance:
-            client.setDiod(0, 255, 0)
+            client.setDiod(0, 0, 255, 0)
         else:
-            client.setDiod(255, 0, 0)
+            client.setDiod(0, 255, 0, 0)
 
         r_regulator(pitch_error)
 
@@ -37,12 +37,26 @@ def sign(value):
         value = -0.2
     return value 
 
-client = HighLevelSimClient()
+client = None
 
-print("connected?", client.connect(ip, port), "\n")
-print("VelCorrect", client.setVelXYYaw(0,0,0),"\n")
-print("takeoff?", client.takeoff(), "\n")
-client.setHeight(0.9)
-time.sleep(5)
-wall_follow()
+
+def main():
+    global client
+    client = HighLevelSimClient()
+    client.connect(ip, port)
+    client.setVelXYYaw(0, 0, 0)
+    client.armDrone()
+    client.takeoff()
+    client.setHeight(0.9)
+    time.sleep(5)
+    try:
+        wall_follow()
+    finally:
+        client.setVelXYYaw(0, 0, 0)
+        client.boarding()
+        client.disconnect()
+
+
+if __name__ == "__main__":
+    main()
 

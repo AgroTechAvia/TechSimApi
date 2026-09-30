@@ -28,13 +28,12 @@ def create_unique_folder(base_folder):
     os.makedirs(folder)
     return folder
 
-def main(folder_name, capture_frequency, image_prefix, max_images, camera_num):
+def main(folder_name, capture_frequency, image_prefix, max_images, camera_num,
+         inav_host, inav_port):
     """Основная функция сбора данных по заданным точкам маршрута"""
 
     # Настройка подключения к INAV
-    HOST = args.inav_host
-    PORT = args.inav_port
-    ADDRESS = (HOST, PORT)
+    ADDRESS = (inav_host, inav_port)
 
     # Создание TCP передатчика для связи с полетным контроллером
     tcp_transmitter = TCPTransmitter(ADDRESS)
@@ -70,7 +69,7 @@ def main(folder_name, capture_frequency, image_prefix, max_images, camera_num):
     time.sleep(0.5)
 
     # Включение режима автопилота (RC5 = 2000)
-    control.send_RAW_RC([100, 1000, 1000, 1000, 2000, 1000, 1000])
+    control.send_RAW_RC([1000, 1000, 1000, 1000, 2000, 1000, 1000])
     control.receive_msg()
     time.sleep(0.1)
     
@@ -129,5 +128,7 @@ if __name__ == "__main__":
         capture_frequency=args.frequency,
         image_prefix=args.prefix,
         max_images=args.max_images,
-        camera_num=args.camera_num
+        camera_num=args.camera_num,
+        inav_host=args.inav_host,
+        inav_port=args.inav_port,
     )

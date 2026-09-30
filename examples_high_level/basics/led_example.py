@@ -2,7 +2,7 @@ from agrotechsimapi import HighLevelSimClient
 import time
 
 ip = '127.0.0.1'
-port = "1233"
+port = 5762
 
 
 def main():
@@ -26,7 +26,7 @@ def main():
             time.sleep(1)
     except Exception as err:
         print(f"[ERROR] {err}")
-
+    finally:
         client.disconnect()
 
 

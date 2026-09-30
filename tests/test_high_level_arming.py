@@ -150,7 +150,8 @@ def test_add_range_for_althold_configures_session_without_eeprom_write():
         assert client.add_range_for_althold() is True
 
     assert client._control.receive_msg.call_count == 3
-    assert [call.args for call in client._control.send_RAW_msg.call_args_list] == [
+    assert [(call.args[0], call.kwargs['data'])
+            for call in client._control.send_RAW_msg.call_args_list] == [
         (34, []),
         (35, [0, 3, 2, 14, 18]),
         (34, []),
