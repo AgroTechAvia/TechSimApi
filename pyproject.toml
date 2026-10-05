@@ -28,6 +28,7 @@ dependencies = [
     "contourpy",
     "cycler",
     "fonttools",
+    "Flask>=3.0,<4",
     "future",
     "grpcio",
     "grpcio-tools",

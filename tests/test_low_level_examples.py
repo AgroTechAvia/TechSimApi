@@ -71,3 +71,20 @@ def test_low_level_examples_do_not_run_on_import():
                     and node.value.func.id in {"main", "serve"}):
                 failures.append(f"{path.relative_to(ROOT)}:{node.lineno}")
     assert not failures, "unguarded example entry points:\n" + "\n".join(failures)
+
+
+def test_mjpeg_home_page_embeds_the_camera_stream():
+    path = EXAMPLES / "video" / "mjpeg_stream_example.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    page = next(
+        node.value.value
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "PAGE"
+                for target in node.targets)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    )
+    assert "<img" in page
+    assert 'src="{{ feed_url }}"' in page
+    assert "/video_feed" in path.read_text(encoding="utf-8")

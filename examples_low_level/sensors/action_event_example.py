@@ -36,6 +36,9 @@ def main():
     listener = keyboard.Listener(on_press=on_i_press)
     listener.start()
 
+    print("нажните [i] для события")
+    print("нажните [o] для выхода")
+
     # Основной цикл программы
     # Программа будет работать до нажатия клавиши 'o'
     while is_run:
