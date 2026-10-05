@@ -11,28 +11,26 @@ def main():
     # Подключение к локальному серверу симулятора на порту 8080
     client = SimClient(address="127.0.0.1", port=8080)
     
-    # Инициализация переменных для управления интенсивностью
-    intensity = 0
-    step = 0.02
-
-    # Включение первого светодиода при старте
-    client.set_led_state(0,True)
-    
+    # Актуальный RPC управляет цветом диода. Нулевой цвет выключает его.
+    client.set_led_intensity(0,1)
+    client.set_led_intensity(1,1)
     # Основной цикл мигания светодиодов
     while is_loop:
         # Выключение обоих светодиодов (led_id 0 и 1)
-        client.set_led_state(led_id = 0,new_state = False)
-        client.set_led_state(led_id = 1,new_state = False)
+        print("задан цвет: черный")
+        client.set_Diod(0, 0.0, 0.0, 0.0)
+        client.set_Diod(1, 0.0, 0.0, 0.0)
+        
         
         # Пауза 0.5 секунды с выключенными светодиодами
         time.sleep(1/2)
-        
+        print("задан цвет: желтый")
         # Включение обоих светодиодов
-        client.set_led_state(led_id = 0, new_state = True)
-        client.set_led_state(led_id = 1, new_state = True)
+        client.set_Diod(0,  250.0, 250.0, 0.0)
+        client.set_Diod(1,  250.0, 250.0, 0.0)
         
         # Пауза 0.5 секунды с включенными светодиодами
         time.sleep(1/2)
 
-# Запуск основной функции
-main()
+if __name__ == "__main__":
+    main()

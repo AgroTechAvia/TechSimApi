@@ -4,54 +4,37 @@ import time
 import cv2
 
 ip = "127.0.0.1"
-port = "1233"
+port = 5762
 
-client = HighLevelSimClient()
 
-# Подключаемся
-client.connect(ip, port)
+def main():
+    client = HighLevelSimClient()
+    client.connect(ip, port)
+    client.setVelXYYaw(0, 0, 0)
+    client.armDrone()
+    time.sleep(2.0)
+    client.altholdOn()
+    time.sleep(2.0)
+    client.takeoff()
+    client.setHeight(1.5)
+    time.sleep(7)
 
-# Сбрасываем скорости
-client.setVelXYYaw(0, 0, 0)
+    start_time = time.time()
+    duration = 120
+    try:
+        while time.time() - start_time <= duration:
+            markers = client.getArucos()
+            print(markers)
+            image = client.getArucosImage()
+            if image is not None:
+                cv2.imshow("img", image)
+                cv2.waitKey(1)
+            time.sleep(0.5)
+    finally:
+        client.boarding()
+        client.disconnect()
+        cv2.destroyAllWindows()
 
-client.armDrone()
 
-time.sleep(2.0)
-
-client.posholdOn()
-
-time.sleep(2.0)
-
-# Взлет
-client.takeoff()
-
-# устанавливаем целевую высоту
-client.setHeight(1.5)
-
-time.sleep(7)
-
-start_time = time.time() # сохранение текущего времени
-duration = 120  # секунд
-
-while True:
-    # Проверка времени
-    if time.time() - start_time > duration:
-        print("Время вышло!")
-        break
-
-    error = client.getArucos()
-    print(error)
-    img = client.getArucosImage()
-    cv2.imshow('img', img)
-    cv2.waitKey(1)
-    time.sleep(0.5)
-
-print(client.boarding())
-time.sleep(3)
-
-client.disarmDrone()
-time.sleep(1)
-
-client.posholdOff()
-
-client.disconnect()
+if __name__ == "__main__":
+    main()

@@ -65,5 +65,5 @@ def main():
         time.sleep(1/15)
     
 
-# Запуск основной функции
-main()
+if __name__ == "__main__":
+    main()

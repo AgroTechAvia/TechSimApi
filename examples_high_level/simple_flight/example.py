@@ -5,7 +5,7 @@ import time
 import math
 
 ip = '127.0.0.1'
-port = "1233"
+port = 5762
 
 
 def main():
@@ -18,7 +18,7 @@ def main():
 
     time.sleep(2.0)
 
-    client.posholdOn()
+    client.altholdOn()
 
     time.sleep(2.0)
 

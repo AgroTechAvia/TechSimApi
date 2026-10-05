@@ -4,21 +4,22 @@ import time
 import cv2
 
 ip = "127.0.0.1"
-port = "1233"
+port = 5762
 
 # Функция поиска маркера
 def search_aruco (yaw_vel):
-    client.setDiod(255, 0, 0)
+    client.setDiod(0, 255, 0, 0)
     client.setVelXYYaw(0, 0, yaw_vel)
     aruco_state = True
     while aruco_state: 
         errors = client.getArucos()
         img = client.getArucosImage()
-        cv2.imshow('img', img)
-        cv2.waitKey(1)
+        if img is not None:
+            cv2.imshow('img', img)
+            cv2.waitKey(1)
         if errors:
             aruco_state = False
-            client.setDiod(0, 255, 0)
+            client.setDiod(0, 0, 255, 0)
             time.sleep(0.5)
             client.setVelXYYaw(0, 0, 0)
 
@@ -29,14 +30,17 @@ def tracking_aruco():
     distance = 1
     accuracy = 0.1
     accuracy_height = 0.15
+    pitch_error = 0.0
+    roll_error = 0.0
     while True:
         errors = client.getArucos()
         img = client.getArucosImage()
-        cv2.imshow('img', img)
-        cv2.waitKey(1)
+        if img is not None:
+            cv2.imshow('img', img)
+            cv2.waitKey(1)
 
         if errors:
-            client.setDiod(0, 255, 0)
+            client.setDiod(0, 0, 255, 0)
             distance_to_marker = errors [0]['pose']['position']['z']
             pitch_error = distance_to_marker - distance
             roll_error = errors[0]['pose']['position']['x']
@@ -56,7 +60,7 @@ def tracking_aruco():
                 aruco_regulation (pitch_error, roll_error, yaw_error, pid_pitch, pid_roll)
                 print (f"pitch_error = {pitch_error}, roll_error = {roll_error}, yaw_error = {yaw_error}")
         else:
-            client.setDiod(255, 0, 0)
+            client.setDiod(0, 255, 0, 0)
             aruco_regulation (pitch_error, roll_error, 0, pid_pitch, pid_roll)
             print (f"Маркер потерян! Поиск:")
             print (f"pitch_error = {pitch_error}, roll_error = {roll_error}")
@@ -89,21 +93,26 @@ def constrain (value, threshold):
     return value
 
 
-client = HighLevelSimClient()
+client = None
 
-# Подключаемся
-print("connected?", client.connect(ip, port), "\n")
-# Сбрасываем скорости
-print("VelCorrect", client.setVelXYYaw(0,0,0),"\n")
-# Взлет
-print("takeoff?", client.takeoff(), "\n")
-print("height", client.setHeight(0.9), "\n")
 
-time.sleep(7)
+def main():
+    global client
+    client = HighLevelSimClient()
+    client.connect(ip, port)
+    client.setVelXYYaw(0, 0, 0)
+    client.armDrone()
+    client.takeoff()
+    client.setHeight(0.9)
+    time.sleep(7)
+    try:
+        search_aruco(-0.5)
+        tracking_aruco()
+    finally:
+        client.boarding()
+        client.disconnect()
+        cv2.destroyAllWindows()
 
-# Ищем маркер
-search_aruco(-0.5)
-# Выравнивание относительно маркера
-tracking_aruco()
-client.boarding()
-client.disconnect()
+
+if __name__ == "__main__":
+    main()

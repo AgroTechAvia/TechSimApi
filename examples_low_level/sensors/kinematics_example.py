@@ -27,5 +27,5 @@ def main():
         print('angular_velocity: ', *result['angular_velocity'])
         time.sleep(1/50)
 
-# Запуск основной функции
-main()
+if __name__ == "__main__":
+    main()

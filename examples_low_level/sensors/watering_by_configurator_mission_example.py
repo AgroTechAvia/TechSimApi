@@ -1,6 +1,7 @@
 import os
 import time
 import socket
+import logging
 import cv2
 import argparse
 from agrotechsimapi import SimClient, CaptureType
@@ -32,7 +33,7 @@ def main(inav_host, inav_port, watering_time):
         control.receive_msg()
         time.sleep(0.5)
         
-        control.send_RAW_RC([100, 1000, 1000, 1000, 2000, 1000, 1000])
+        control.send_RAW_RC([1000, 1000, 1000, 1000, 2000, 1000, 1000])
         control.receive_msg()
         time.sleep(0.1)
         

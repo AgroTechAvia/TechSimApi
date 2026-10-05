@@ -2,7 +2,7 @@ from agrotechsimapi import HighLevelSimClient
 import time
 
 ip = '127.0.0.1'
-port = "1233"
+port = 5762
 
 color_red = [255, 0, 0]
 color_green = [0, 255, 0]
@@ -16,6 +16,7 @@ def main():
     client.connect(ip, port)
     time.sleep(2.0)
     # взлет
+    client.armDrone()
     client.takeoff()
     time.sleep(7.0)
 
@@ -26,7 +27,7 @@ def main():
             time.sleep(1)
     except Exception as err:
         print(f"[ERROR] {err}")
-
+    finally:
         client.disconnect()
 
 

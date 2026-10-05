@@ -88,7 +88,7 @@ pip install .
 - 🎯 **Стабилизация**: PID-регуляторы для автоматического удержания позиции
 - 👁️ **Обработка изображений**: Детектирование ArUco маркеров и blob-объектов
 - 🔄 **Одометрия**: Отслеживание перемещения относительно начальной точки
-- **Обновление автономного полета**: Для большинства дронов добавлены готовые пресеты PID в [`agrotechsimapi/utils/drone_setups.py`](agrotechsimapi/utils/drone_setups.py), при этом все регуляторы можно настраивать вручную. Пример: [`examples_high_level/simple_flight/pid_waypoints_flight.py`](examples_high_level/simple_flight/pid_waypoints_flight.py).
+- **Обновление автономного полета**: Пакет содержит именованные PID-профили и встроенный калибратор. Готовые пресеты `edu-ext`, `edu-constructor` и `edu` можно выбрать при создании клиента; отдельные регуляторы по-прежнему можно переопределять вручную.
 
 ### 📁 Примеры использования
 
@@ -116,6 +116,51 @@ cv2.imshow("Drone Camera", image)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
 ```
+
+### 🎛️ Калибровка автономного полёта
+
+По умолчанию `HighLevelSimClient` использует встроенный профиль `edu-ext`.
+Профиль можно выбрать по имени:
+
+```python
+from agrotechsimapi import HighLevelSimClient
+
+client = HighLevelSimClient(calibration="edu")
+```
+
+Посмотреть доступные профили и создать конфигурацию новой калибровки:
+
+```bash
+python -m agrotechsimapi calibrations list
+python -m agrotechsimapi calibrations init-config --output calibration.json
+```
+
+Сначала рекомендуется проверить план без подключения к симулятору, а затем
+запустить полёт с `--fly`:
+
+```bash
+python -m agrotechsimapi calibrate --name my_drone --config calibration.json
+python -m agrotechsimapi calibrate --name my_drone --config calibration.json --fly
+```
+
+Калибратор последовательно настраивает высоту, yaw, ускорение XY, скорость XY и
+положение XY. Посмотреть текущий запуск или готовый профиль можно в автономном
+HTML-отчёте:
+
+```bash
+python -m agrotechsimapi plot --current --last 8 --open
+python -m agrotechsimapi plot --calibration my_drone --open
+```
+
+Профили можно переносить между окружениями:
+
+```bash
+python -m agrotechsimapi calibrations export my_drone --output my_drone.json
+python -m agrotechsimapi calibrations import my_drone.json --name imported_drone
+```
+
+Подробности находятся в [практической инструкции](docs/calibration_guide.md) и
+[техническом описании](docs/calibration.md).
 
 ### 🧪 Тестирование работоспособности
 
@@ -168,7 +213,7 @@ Running SimClient Integration Tests with Real Simulator
 ============================================================
 
 test_connection: ✓ PASSED
-test_get_camera_capture: ✓ PASSED  
+test_get_camera_capture: ✓ PASSED
 test_get_kinematics_data: ✓ PASSED
 test_get_range_data: ✓ PASSED
 test_get_laser_scan: ✓ PASSED
@@ -289,7 +334,7 @@ pip install .
 - 🎯 **Stabilization**: PID controllers for automatic position hold
 - 👁️ **Image Processing**: ArUco marker and blob object detection
 - 🔄 **Odometry**: Track movement relative to starting point
-- **Autonomous flight update**: For most drones there are built-in PID presets in [`agrotechsimapi/utils/drone_setups.py`](agrotechsimapi/utils/drone_setups.py), and every regulator can still be overridden manually. See example: [`examples_high_level/simple_flight/pid_waypoints_flight.py`](examples_high_level/simple_flight/pid_waypoints_flight.py).
+- **Autonomous flight update**: The package provides named PID profiles and a built-in calibration workflow. Select `edu-ext`, `edu-constructor`, or `edu` when creating the client; individual controllers can still be overridden manually.
 
 ### 📁 Usage Examples
 
@@ -316,6 +361,50 @@ cv2.imshow("Drone Camera", image)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
 ```
+
+### 🎛️ Autonomous Flight Calibration
+
+`HighLevelSimClient` uses the bundled `edu-ext` profile by default. Select a
+different profile by name:
+
+```python
+from agrotechsimapi import HighLevelSimClient
+
+client = HighLevelSimClient(calibration="edu")
+```
+
+List available profiles and create an editable calibration configuration:
+
+```bash
+python -m agrotechsimapi calibrations list
+python -m agrotechsimapi calibrations init-config --output calibration.json
+```
+
+Preview the plan first, then add `--fly` to connect to the simulator:
+
+```bash
+python -m agrotechsimapi calibrate --name my_drone --config calibration.json
+python -m agrotechsimapi calibrate --name my_drone --config calibration.json --fly
+```
+
+The workflow tunes altitude, yaw, XY acceleration, XY velocity and XY position
+in sequence. Generate a one-time HTML snapshot of the active run or a completed
+profile with:
+
+```bash
+python -m agrotechsimapi plot --current --last 8 --open
+python -m agrotechsimapi plot --calibration my_drone --lang en --open
+```
+
+Export and import profiles between environments or computers:
+
+```bash
+python -m agrotechsimapi calibrations export my_drone --output my_drone.json
+python -m agrotechsimapi calibrations import my_drone.json --name imported_drone
+```
+
+See the [practical calibration guide](docs/calibration_guide.md) and the
+[technical reference](docs/calibration.md) for details.
 
 ### 🧪 Functionality Testing
 
@@ -368,7 +457,7 @@ Running SimClient Integration Tests with Real Simulator
 ============================================================
 
 test_connection: ✓ PASSED
-test_get_camera_capture: ✓ PASSED  
+test_get_camera_capture: ✓ PASSED
 test_get_kinematics_data: ✓ PASSED
 test_get_range_data: ✓ PASSED
 test_get_laser_scan: ✓ PASSED

@@ -4,7 +4,7 @@ from agrotechsimapi import HighLevelSimClient
 import datetime 
 
 ip = "127.0.0.1" 
-port = "1233" 
+port = 5762
 
 def WallFollow():
     pid_pitch= PID(0.2, 0.0, 0.5) 
@@ -50,16 +50,25 @@ def constrain(value, threshold):
         value = -threshold 
     return value 
 
-client = HighLevelSimClient() 
+client = None
 
-print("connected?", client.connect(ip, port), "\n") 
-print("VelCorrect", client.setVelXYYaw(0,0,0),"\n") 
-print("takeoff?", client.takeoff(), "\n") 
-client.setHeight(0.9) 
 
-time.sleep(5) 
-client.setHeight(0.9) 
-# time.sleep(5) 
-print("Wall Follow: ", WallFollow(), "\n") 
-print("VelCorrect", client.setVelXYYaw(0,0,0),"\n")
-print("boarding?", client.boarding(), "\n")
+def main():
+    global client
+    client = HighLevelSimClient()
+    client.connect(ip, port)
+    client.setVelXYYaw(0, 0, 0)
+    client.armDrone()
+    client.takeoff()
+    client.setHeight(0.9)
+    time.sleep(5)
+    try:
+        WallFollow()
+    finally:
+        client.setVelXYYaw(0, 0, 0)
+        client.boarding()
+        client.disconnect()
+
+
+if __name__ == "__main__":
+    main()

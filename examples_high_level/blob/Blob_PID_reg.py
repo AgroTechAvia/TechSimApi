@@ -6,7 +6,7 @@ import math
 import cv2
 
 ip = "127.0.0.1"
-port = "1233"
+port = 5762
 
 last_time = None
 
@@ -72,25 +72,26 @@ def constrain(value, threshold):
        value = -threshold
    return value       
 
-client = HighLevelSimClient()
+client = None
 
-print("connected?", client.connect(ip, port), "\n")
-time.sleep(2)
-print("VelCorrect", client.setVelXYYaw(0,0,0),"\n")
-client.armDrone()
-time.sleep(2.0)
-    # включаем пежим удержания позиции
-client.posholdOn()
 
-time.sleep(2.0)
-client.takeoff()
-time.sleep(7)
-# client.setYaw(1.57)
-BlobRegulation(2300)
-print("VelCorrect", client.setVelXYYaw(0,0,0),"\n")
-print("boarding?", client.boarding(), "\n")
-client.posholdOff()
-time.sleep(2.0)
-client.disarmDrone()
-time.sleep(2.0)
-client.disconnect()
+def main():
+    global client
+    client = HighLevelSimClient()
+    client.connect(ip, port)
+    client.setVelXYYaw(0, 0, 0)
+    client.armDrone()
+    client.altholdOn()
+    client.takeoff()
+    time.sleep(7)
+    try:
+        BlobRegulation(2300)
+    finally:
+        client.setVelXYYaw(0, 0, 0)
+        client.boarding()
+        client.disconnect()
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()

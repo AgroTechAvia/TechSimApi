@@ -4,18 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agrotechsimapi"
-version = "1.0.3"
+version = "1.1.0"
 authors = [
-  { name="AgroTechAvia", email="example@main.com" },
+  { name="AgroTechAvia" },
 ]
-description = "This repository contains the API for the AgroTechAvia simulators. This repository also contains several examples of how to interact with the API."
+description = "Python API and calibrated autonomous flight control for AgroTechSim"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
+keywords = ["AgroTechSim", "simulator", "drone", "robotics", "PID"]
 
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering",
 ]
 
 dependencies = [
@@ -23,6 +28,7 @@ dependencies = [
     "contourpy",
     "cycler",
     "fonttools",
+    "Flask>=3.0,<4",
     "future",
     "grpcio",
     "grpcio-tools",
@@ -48,5 +54,17 @@ dependencies = [
     "inavmspapi",
 ]
 
-[tool.setuptools]
-packages = ["agrotechsimapi", "modules","agrotechsimapi.utils"]
+[project.urls]
+Homepage = "https://github.com/AgroTechAvia/TechSimApi"
+Repository = "https://github.com/AgroTechAvia/TechSimApi"
+Documentation = "https://github.com/AgroTechAvia/TechSimApi/tree/main/docs"
+Issues = "https://github.com/AgroTechAvia/TechSimApi/issues"
+
+[project.scripts]
+agrotechsimapi = "agrotechsimapi.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["agrotechsimapi*", "modules*"]
+
+[tool.setuptools.package-data]
+"agrotechsimapi.calibration" = ["data/*.json", "data/*.gz", "assets/*.css", "assets/*.js"]

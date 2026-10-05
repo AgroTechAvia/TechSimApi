@@ -1,0 +1,3 @@
+recursive-include docs *.md
+recursive-include agrotechsimapi/calibration/data *.json *.gz
+recursive-include agrotechsimapi/calibration/assets *.css *.js

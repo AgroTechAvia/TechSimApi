@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inavmspapi"
+version = "1.1.0"
+authors = [
+  { name="AgroTechAvia", email="example@main.com" },
+]
+description = "This module allows you to implement the transmitter logic for MSP"
+readme = "README.md"
+requires-python = ">=3.10"
+
+license = "Apache-2.0"
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "pynput",
+    "pyserial",
+    "future",
+    "iso8601",
+    "pyYAML",
+]

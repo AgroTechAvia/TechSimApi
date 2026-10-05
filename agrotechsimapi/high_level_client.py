@@ -18,6 +18,10 @@ import math
 import threading
 import logging
 import asyncio
+import copy
+from pathlib import Path
+from agrotechsimapi.control import CascadedController, Sample, sample_from_kinematics
+from agrotechsimapi.calibration.store import DEFAULT_PRESET, CalibrationStore, runtime_pids
 
 import numpy as np
 
@@ -38,6 +42,18 @@ class HighLevelSimClient:
     """High-level API for drone control in the TechSim simulator."""
 
     ControlMode = Literal["position", "velocity"]
+
+    _ARM_RESET_FRAME = (1000, 1000, 1000, 1000, 1000, 1000, 1000)
+    _ARM_SWITCH_FRAME = (1000, 1000, 1000, 1000, 2000, 1000, 1000)
+    _ARMED_NEUTRAL_FRAME = (1500, 1500, 1000, 1500, 2000, 1000, 1000)
+    _ARM_FRAME_FREQUENCY = 20.0
+    _ARM_SETTLE_SECONDS = 1.0
+
+    _ALTHOLD_MODE_ID = 3
+    _ALTHOLD_AUX_CHANNEL_INDEX = 2
+    _ALTHOLD_RANGE_START = 1250
+    _ALTHOLD_RANGE_END = 1350
+    _ALTHOLD_AUX_VALUE = 1300
 
     _max_velocity = 0.2  # Maximum linear speed in m/s.
     _max_acceleration = 0.75  # Maximum linear acceleration in m/s^2.
@@ -91,45 +107,53 @@ class HighLevelSimClient:
         pid_vel_roll: Optional[Union[PID, Dict]] = None,
         pid_yaw: Optional[Union[PID, Dict]] = None,
         pid_height: Optional[Union[PID, Dict]] = None,
+        *,
+        calibration: str = DEFAULT_PRESET,
+        calibration_path: Optional[Union[str, Path]] = None,
+        calibration_dir: Optional[Union[str, Path]] = None,
+        pid_accel_pitch: Optional[Union[PID, Dict]] = None,
+        pid_accel_roll: Optional[Union[PID, Dict]] = None,
     ):
         """Initialize client state, PID controllers, and runtime flags."""
         self.camera_id = 0
 
-        preset_pid_setup = get_drone_pid_setup(drone_name)
+        store = CalibrationStore(calibration_dir)
+        profile = store.load_file(calibration_path) if calibration_path is not None else store.load(calibration)
+        self.calibration_name = profile["name"]
+        self.calibration = copy.deepcopy(profile)
+        self._control_config = copy.deepcopy(profile["config"])
         self._takeoff_height = get_drone_takeoff_height(drone_name)
-
-        pid_pos_x_config = self._resolve_pid_config(preset_pid_setup["pid_pos_x"], pid_pos_x, "pid_pos_x")
-        pid_pos_y_config = self._resolve_pid_config(preset_pid_setup["pid_pos_y"], pid_pos_y, "pid_pos_y")
-        pid_vel_pitch_config = self._resolve_pid_config(
-            preset_pid_setup["pid_vel_pitch"], pid_vel_pitch, "pid_vel_pitch"
-        )
-        pid_vel_roll_config = self._resolve_pid_config(
-            preset_pid_setup["pid_vel_roll"], pid_vel_roll, "pid_vel_roll"
-        )
-        pid_yaw_config = self._resolve_pid_config(preset_pid_setup["pid_yaw"], pid_yaw, "pid_yaw")
-        pid_height_config = self._resolve_pid_config(
-            preset_pid_setup["pid_height"], pid_height, "pid_height"
-        )
-
-        self._pid_pos_x = PID(**pid_pos_x_config)
-        self._pid_pos_y = PID(**pid_pos_y_config)
-
-        self._pid_vel_pitch = PID(**pid_vel_pitch_config)
-        self._pid_vel_roll = PID(**pid_vel_roll_config)
-
-
-        #self._pid_yaw_rate = PID(kp=4.7, ki=0.0, kd=2.0, max_control=1.0, i_limit=None)
-
-        self._pid_yaw = PID(**pid_yaw_config)
-        self._pid_height = PID(**pid_height_config)
-        self._base_throttle_hover = 1000
-        self._max_throttle = 1675
-        self._min_throttle = 1470
-
-        self._roll_direction = -1.0
-        self._pitch_direction = 1.0
-        self._yaw_direction = 1.0
-        # ====================================================================
+        configs = runtime_pids(profile)
+        overrides = dict(pid_pos_x=pid_pos_x, pid_pos_y=pid_pos_y,
+                         pid_vel_pitch=pid_vel_pitch, pid_vel_roll=pid_vel_roll,
+                         pid_yaw=pid_yaw, pid_height=pid_height,
+                         pid_accel_pitch=pid_accel_pitch, pid_accel_roll=pid_accel_roll)
+        for name, override in overrides.items():
+            configs[name] = self._resolve_pid_config(configs[name], override, name)
+        self._cascade = CascadedController(self._control_config, configs)
+        for name, pid in self._cascade.pids.items():
+            setattr(self, '_' + name, pid)
+        self._calibrated_base_throttle = self._control_config['height_base_throttle_rc']
+        self._base_throttle_hover = self._calibrated_base_throttle
+        self._max_throttle = 1800
+        self._min_throttle = 1200
+        self._max_velocity = self._control_config['max_xy_speed']
+        self._max_acceleration = self._control_config['max_xy_acceleration']
+        self._roll_direction = self._control_config['direction']['roll']
+        self._pitch_direction = self._control_config['direction']['pitch']
+        self._yaw_direction = self._control_config['direction']['yaw']
+        self._control_lock = threading.RLock()
+        self._latest_sample = None
+        self._last_control_sample_t = None
+        self._control_telemetry = {}
+        self._velocity_frame = 'base_link'
+        self._descent_goal = None
+        self._descent_command = None
+        self._descent_step_started = None
+        self._descent_step_origin = None
+        self._landing_throttle = None
+        self._z_bias = 0.0
+        self._reference_initialized = False
 
         self._control_mode = "position"
         self._target_position = (0.0, 0.0)
@@ -147,7 +171,7 @@ class HighLevelSimClient:
         self._prev_target_vy = 0.0
         self._prev_target_vz = 0.0
 
-        self._vel_filter_alpha = 0.82
+        self._vel_filter_alpha = self._control_config["velocity_filter_alpha"]
         self._filtered_vx_world = 0.0
         self._filtered_vy_world = 0.0
         self._vel_filter_initialized = False
@@ -160,6 +184,8 @@ class HighLevelSimClient:
         self._armed_flag = False
         self._poshold_flag = False
         self._althold_flag = False
+        self._althold_range_configured = False
+        self._height_timer_started = False
 
         self._sim_img = None
         self._blob_img = None
@@ -174,6 +200,9 @@ class HighLevelSimClient:
         self._sim_ultrasonic = None
 
         self._client_lock = threading.Lock()
+        self._msp_io_lock = threading.Lock()
+        self._arming_rc_frame = None
+        self._rc_timer_suspended = False
 
         self._consecutive_errors = 0
         self._error_threshold = 2
@@ -184,305 +213,122 @@ class HighLevelSimClient:
         self._is_abort = False
         # =====================================
 
-        print("process started")
-    
-    def connect(self, ip, port):
-        """Connect to simulator services, initialize clients, and start timers."""
-        self.__HOST = ip
-        self.__SIM_PORT = 8080
-        self.__TCP_PORT = 5762
-        self.__TCP_ADDRESS = (self.__HOST, self.__TCP_PORT)
-
-        self.__tcp_transmitter = TCPTransmitter(self.__TCP_ADDRESS)
-        self.__tcp_transmitter.connect()
-        self._control = MultirotorControl(self.__tcp_transmitter)
-        time.sleep(2)
-        print("[info] Adding ALTHOLD range... ")
-        self.add_range_for_althold()
-
-        print("[info] Resetting MSP arming flags... ")
-        try:
-            self._control.send_RAW_RC([1000, 1000, 1000, 1000, 1000, 1000, 1000])
-            time.sleep(0.5)
-        except Exception as e:
-            logger.warning(f"Could not reset MSP flags: {e}")
-
-        with self._client_lock:
-            self._client = SimClient(address=self.__HOST, port=self.__SIM_PORT)
-
-        self._rc_timer = LoopingTimer(interval=1/50, callback=self.transmit_rc_to_sim, name="rc_timer")
-
-        self._sim_kinematics_timer = LoopingTimer(interval=1/50, callback=self.sim_kinematics_callback, name="sim_kinematics_timer")
-        self._image_processing_timer = LoopingTimer(interval=1/10, callback=self.image_processing_callback, name="image_processing_timer")
-
-        self._yaw_timer = LoopingTimer(interval=1/25, callback=self.yaw_callback, name="yaw_timer")
-
-        self._position_timer = LoopingTimer(interval=1/20, callback=self.position_callback, name="position_timer")
-        self._velocity_timer = LoopingTimer(interval=1/50, callback=self.velocity_callback, name="velocity_timer")
-
-        self._height_timer = LoopingTimer(interval=1/50, callback=self.height_callback, name="height_timer")
-
-        self.sim_kinematics_callback()
         self.initDrone()
-
-        time.sleep(0.5)
-        self._z_bias = self._client.get_kinametics_data()["location"][2]
-        print(f"[info] z_bias: {self._z_bias:.2f}")
-
-        self._sim_kinematics_timer.start()
-        self._rc_timer.start()
-        self._image_processing_timer.start()
-        self._yaw_timer.start()
-        self._position_timer.start()
-        self._velocity_timer.start()
-
-
-        time.sleep(1)
-        time.sleep(1)
-
-
     
-    def disconnect(self):
-        """Safely disarm, stop timers, and close transmitter connection."""
-        print("[info] Disconect")
-
-        print("[info] Disarming drone before disconnect... ")
-        self.disarmDrone()
-        self.posholdOff()
-
-        time.sleep(0.5)
-
-        self._sim_kinematics_timer.stop()
-        self._rc_timer.stop()
-
-        self._image_processing_timer.stop()
-
-        self._yaw_timer.stop()
-
-        self._position_timer.stop()
-        self._velocity_timer.stop()
-
-        self._height_timer.stop()
-
-        if hasattr(self, '_tcp_transmitter') and self._tcp_transmitter:
-            try:
-                self._tcp_transmitter.disconnect()
-            except Exception as e:
-                logger.warning(f"Error disconnecting TCP: {e}")
-    
-    # =========================================================
-    # =========================================================
-    
-    def yaw_callback(self):
-        """Update yaw control loop and write yaw PWM output."""
-        if not self._simulator_alive:
-            return
-
+    def connect(self, ip, port=5762, *, sim_port=8080):
+        """Connect MSP on port and simulator RPC on sim_port; start control."""
+        port, sim_port = int(port), int(sim_port)
+        if not (1 <= port <= 65535 and 1 <= sim_port <= 65535):
+            raise ValueError('MSP and simulator ports must be between 1 and 65535')
+        self.__HOST = ip
+        self.__SIM_PORT = sim_port
+        self.__TCP_PORT = port
+        self.__TCP_ADDRESS = (ip, port)
+        self._simulator_alive = True
+        self._consecutive_errors = 0
+        self._reference_initialized = False
+        self._latest_sample = None
+        self._last_control_sample_t = None
+        self._height_timer_started = False
         try:
-            current_yaw = self._get_yaw_cw()
-            error = self._target_yaw - current_yaw
-            error = self._wrap_pi(error)
-            
-            self._pid_yaw.update_control(error)
-            yaw_rate = self._pid_yaw.get_control()
+            self.__tcp_transmitter = TCPTransmitter(self.__TCP_ADDRESS)
+            self.__tcp_transmitter.connect()
+            if not self.__tcp_transmitter.is_connect:
+                raise ConnectionError(f'Could not connect to MSP at {ip}:{port}')
+            self._control = MultirotorControl(self.__tcp_transmitter)
+            time.sleep(2)
+            self._althold_range_configured = self.add_range_for_althold()
+            self._send_rc_frame(self._ARM_RESET_FRAME)
+            time.sleep(0.5)
+            self._client = SimClient(address=ip, port=sim_port)
+            # Camera/range RPC must not delay the 55 Hz kinematics stream.
+            self._kinematics_client = SimClient(address=ip, port=sim_port)
+            self._sensors_client = SimClient(address=ip, port=sim_port)
+            self.initDrone()
+            period = 1 / self._control_config['kinematics_hz']
+            self._rc_timer = LoopingTimer(period, self.transmit_rc_to_sim, name='rc_timer')
+            self._sim_kinematics_timer = LoopingTimer(period, self.sim_kinematics_callback, name='kinematics')
+            self._image_processing_timer = LoopingTimer(0.1, self._sensor_callback, name='sensors')
+            # Compatibility timer attributes remain available. Control itself runs
+            # once per fresh sample, with the shared cascade scheduling each loop.
+            self._yaw_timer = LoopingTimer(1/25, self.yaw_callback, name='yaw')
+            self._position_timer = LoopingTimer(1/self._control_config['position_control_hz'], self.position_callback, name='position')
+            self._velocity_timer = LoopingTimer(1/self._control_config['velocity_control_hz'], self.velocity_callback, name='velocity')
+            self._height_timer = LoopingTimer(period, self.height_callback, name='height')
+            self.sim_kinematics_callback()
+            if self._latest_sample is None:
+                raise ConnectionError('No valid simulator kinematics')
+            self._sim_kinematics_timer.start()
+            self._rc_timer.start()
+            self._image_processing_timer.start()
+        except Exception:
+            self._stop_all_timers()
+            self._close_connections()
+            raise
 
-            yaw_pwm = vel_to_rc_signal(yaw_rate * self._yaw_direction)
-            if self._yaw_mode == "position":
-                r, p, _ = self._rpy_vel_data
-                self._rpy_vel_data = (r, p, yaw_pwm)
+    def disconnect(self):
+        """Disarm, stop every worker, and close all RPC/MSP connections."""
+        self.disarmDrone()
+        self._stop_all_timers()
+        if hasattr(self, '_control'):
+            try:
+                self._send_rc_frame(self._current_rc_frame())
+            except Exception as exc:
+                logger.warning('Could not send final disarm: %s', exc)
+        self._althold_flag = False
+        self._height_timer_started = False
+        self._close_connections()
 
-        except Exception as e:
-            logger.warning(f"Error in yaw_callback: {e}")
+    def _close_connections(self):
+        for name in ('_client', '_kinematics_client', '_sensors_client'):
+            client = getattr(self, name, None)
+            if client is not None:
+                try:
+                    client.rpc_client.close()
+                except Exception:
+                    pass
+                setattr(self, name, None)
+        transmitter = getattr(self, '_HighLevelSimClient__tcp_transmitter', None)
+        if transmitter is not None:
+            transmitter.disconnect()
+
+    def yaw_callback(self):
+        """Compatibility callback; advance the cascade at most once per sample."""
+        self._control_step()
 
     def position_callback(self):
-        """Outer loop: position error to target body-frame velocity."""
-        if not self._simulator_alive:# or self._motors_locked:
-            return
-
-        try:
-            kin = self.get_sim_kinematics()
-            if kin is None:
-                return
-
-            x_w = sim_to_api_distance(kin["location"][0])
-            y_w = sim_to_api_distance(kin["location"][1])
-
-            yaw = self._get_yaw_cw()
-            cos_yaw = math.cos(yaw)
-            sin_yaw = math.sin(yaw)
-
-            if self._control_mode == "position":
-                tx, ty = self._target_position
-                pos_error_x = tx - x_w
-                pos_error_y = ty - y_w
-
-                self._pid_pos_x.update_control(pos_error_x)
-                self._pid_pos_y.update_control(pos_error_y)
-
-                tvx_world = max(min(self._pid_pos_x.get_control(), self._max_velocity),-self._max_velocity)
-                tvy_world = max(min(self._pid_pos_y.get_control(), self._max_velocity),-self._max_velocity)
-
-                # [ cos_yaw   -sin_yaw ] [vx_world]
-                # [ sin_yaw    cos_yaw ] [vy_world]
-                tvx_body = tvx_world * cos_yaw - tvy_world * sin_yaw
-                tvy_body = tvx_world * sin_yaw + tvy_world * cos_yaw
-
-                self._target_velocity = (tvx_body, tvy_body)
-
-
-        except Exception as e:
-            logger.warning(f"Error in position_callback: {e}")
+        """Compatibility callback; advance the cascade at most once per sample."""
+        self._control_step()
 
     def velocity_callback(self):
-        """Inner loop: body-frame velocity error to roll and pitch PWM."""
-        if not self._simulator_alive:# or self._motors_locked:
-
-            return
-
-        try:
-            kin = self.get_sim_kinematics()
-            if kin is None:
-
-                return
-
-            x_w = sim_to_api_distance(kin["location"][0])
-            y_w = sim_to_api_distance(kin["location"][1])
-
-            yaw = self._get_yaw_cw()
-            cos_yaw = math.cos(yaw)
-            sin_yaw = math.sin(yaw)
-
-            raw_vx_world = (x_w - self._prev_x) * 50
-            raw_vy_world = (y_w - self._prev_y) * 50
-
-            self._prev_x = x_w
-            self._prev_y = y_w
-
-            if not self._vel_filter_initialized:
-                self._filtered_vx_world = raw_vx_world
-                self._filtered_vy_world = raw_vy_world
-                self._vel_filter_initialized = True
-            else:
-                alpha = self._vel_filter_alpha
-                self._filtered_vx_world = alpha * raw_vx_world + (1 - alpha) * self._filtered_vx_world
-                self._filtered_vy_world = alpha * raw_vy_world + (1 - alpha) * self._filtered_vy_world
-
-            vx_body = self._filtered_vx_world * cos_yaw - self._filtered_vy_world * sin_yaw
-            vy_body = self._filtered_vx_world * sin_yaw + self._filtered_vy_world * cos_yaw
-
-            tvx_body, tvy_body = self._target_velocity
-
-            dvx = tvx_body - self._prev_target_vx
-            dvy = tvy_body - self._prev_target_vy
-            dt = 0.02
-            accel = math.hypot(dvx / dt, dvy / dt)
-
-            if accel > self._max_acceleration:
-                scale = self._max_acceleration / accel
-                tvx_body = self._prev_target_vx + dvx * scale
-                tvy_body = self._prev_target_vy + dvy * scale
-
-            self._prev_target_vx = tvx_body
-            self._prev_target_vy = tvy_body
-
-            vel_error_x = tvx_body - vx_body
-            vel_error_y = tvy_body - vy_body
-
-            self._pid_vel_pitch.update_control(vel_error_x)
-            self._pid_vel_roll.update_control(vel_error_y)
-
-            feedforward_pitch = 0.0
-            feedforward_roll = 0.0
-            
-            target_speed_x = abs(tvx_body)
-            actual_speed_x = abs(vx_body)
-            if target_speed_x > 0.05 and actual_speed_x < target_speed_x * 0.33:
-                speed_ratio = actual_speed_x / target_speed_x if target_speed_x > 0 else 0
-                feedforward_pitch = (1.0 - speed_ratio) * 1.33
-            
-            target_speed_y = abs(tvy_body)
-            actual_speed_y = abs(vy_body)
-            if target_speed_y > 0.05 and actual_speed_y < target_speed_y * 0.33:
-                speed_ratio = actual_speed_y / target_speed_y if target_speed_y > 0 else 0
-                feedforward_roll = (1.0 - speed_ratio) * 1.33
-
-            pitch_control = self._pid_vel_pitch.get_control() * (1 + feedforward_pitch )
-            roll_control = self._pid_vel_roll.get_control() *  (1 + feedforward_roll )
-            
-            pitch_pwm = int(vel_to_rc_signal(pitch_control * self._pitch_direction))
-            roll_pwm = int(vel_to_rc_signal(roll_control * self._roll_direction))
-
-            if self._control_mode == "position":
-                _, _, y = self._rpy_vel_data
-                self._rpy_vel_data = (roll_pwm, pitch_pwm, y)
-
-        except Exception as e:
-            logger.warning(f"Error in velocity_callback: {e}")
+        """Compatibility callback; advance the cascade at most once per sample."""
+        self._control_step()
 
     def height_callback(self):
-        """Height loop: altitude error to throttle command."""
-        if not self._simulator_alive or self._motors_locked:
-            return
-
-        try:
-            kin = self.get_sim_kinematics()
-            if kin is not None:
-                self._altitude = sim_to_api_distance(kin["location"][2])
-
-            height_error = self._target_height - self._altitude + self._z_bias if self._target_height < 0.3 else self._target_height - self._altitude
-            #print(f"height_error: {height_error}")
-
-            self._pid_height.update_control(height_error)
-            delta_throttle = int((self._pid_height.get_control() * 100))# // 2) * 2
-
-            throttle_output = self._base_throttle_hover + delta_throttle
-
-            throttle_output = max(self._min_throttle, min(throttle_output, self._max_throttle))
-
-            self._throttle_data = throttle_output
-            #print(f"height_error: {height_error} _throttle_data: {self._throttle_data}")
-
-        except Exception as e:
-            print(f"Error in height_callback: {e}")
-            logger.warning(f"Error in height_callback: {e}")
-        
+        """Compatibility callback; advance the cascade at most once per sample."""
+        self._control_step()
 
     def set_velocity_xy(self, vx: float, vy: float, frame: str = "base_link"):
-        """Set commanded XY velocity and switch to velocity mode."""
-        print(f"\n[control] set velocity xy x:{round(vx,2)} y:{round(vy,2)}")
-        self._control_mode = "velocity"
-
-        pitch_pwm = int(vel_to_rc_signal(vx))
-        roll_pwm = int(vel_to_rc_signal(vy))
-
-        _, _, y = self._rpy_vel_data
-        self._rpy_vel_data = (roll_pwm, pitch_pwm, y)
-
-        '''if frame == "odom":
-            yaw = self._get_yaw_cw()
-            cos_yaw = math.cos(yaw)
-            sin_yaw = math.sin(yaw)
-            # [ cos_yaw   -sin_yaw ] [vx_world]
-            # [ sin_yaw    cos_yaw ] [vy_world]
-            vx_body = vx * cos_yaw - vy * sin_yaw
-            vy_body = vx * sin_yaw + vy * cos_yaw
-        else:
-            vx_body = vx
-            vy_body = vy
-
-        vx_body = max(-self._max_velocity * 2, min(self._max_velocity * 2, vx_body))
-        vy_body = max(-self._max_velocity * 2, min(self._max_velocity * 2, vy_body))
-
-        self._target_velocity = (vx_body, vy_body)'''
-
+        """Set XY speed in m/s; odom stays world-fixed while the drone turns."""
+        if frame not in ('base_link', 'odom'):
+            raise ValueError("frame must be 'odom' or 'base_link'")
+        if not all(math.isfinite(v) for v in (vx, vy)):
+            raise ValueError('Velocity must be finite')
+        with self._control_lock:
+            self._control_mode = 'velocity'
+            self._velocity_frame = frame
+            self._target_velocity = tuple(max(-self._max_velocity, min(self._max_velocity, v)) for v in (vx, vy))
 
     def set_position_mode(self):
-        """Switch horizontal controller to position mode."""
-        self._control_mode = "position"
+        """Switch to position hold at the current location."""
+        with self._control_lock:
+            if self._control_mode != 'position':
+                self._target_position = self._world_xy()
+            self._control_mode = 'position'
 
     def set_velocity_mode(self):
-        """Switch horizontal controller to velocity mode."""
-        self._control_mode = "velocity"
+        """Switch to velocity control with a zero-speed command."""
+        self.set_velocity_xy(0.0, 0.0)
 
     def set_velocity_yaw(self, yaw_rate: float):
         """Set yaw rate command and switch yaw controller to rate mode."""
@@ -504,14 +350,18 @@ class HighLevelSimClient:
 
     def unlock_motors(self):
         """Allow motor command updates from control callbacks."""
+        if self._motors_locked and hasattr(self, '_cascade'):
+            with self._control_lock:
+                self._cascade.reset(self._latest_sample)
+                self._last_control_sample_t = None
         self._motors_locked = False
     
     def set_max_velocity(self, max_vel: float):
         """Set maximum horizontal velocity limit in m/s."""
         self._max_velocity = max(0.1, min(max_vel, 5.0))
         
-        self._pid_pos_x._max_control = self._max_velocity
-        self._pid_pos_y._max_control = self._max_velocity
+        self._pid_pos_x.max_control = self._max_velocity
+        self._pid_pos_y.max_control = self._max_velocity
         
         logger.info(f"Max velocity set to {self._max_velocity} m/s")
     
@@ -570,6 +420,7 @@ class HighLevelSimClient:
         alpha = max(0.0, min(1.0, alpha))
         self._vel_filter_alpha = alpha
         self._vel_filter_initialized = False
+        self._cascade.filter_initialized = False
         logger.info(f"Velocity filter alpha set to {alpha}")
 
     def get_velocity_filter_alpha(self) -> float:
@@ -581,6 +432,9 @@ class HighLevelSimClient:
         self._vel_filter_initialized = False
         self._filtered_vx_world = 0.0
         self._filtered_vy_world = 0.0
+        self._cascade.filter_initialized = False
+        self._cascade.previous_body_velocity = None
+        self._cascade.filtered_ax = self._cascade.filtered_ay = 0.0
         logger.info("Velocity filter reset")
 
     # ==============================================
@@ -599,7 +453,7 @@ class HighLevelSimClient:
         self._control_mode = "position"
         if self._yaw_mode == "velocity":
             self._yaw_mode = "position"
-            self._target_yaw = self._wrap_pi(0)
+            self._target_yaw = self._get_yaw_cw()
         kin = self.get_sim_kinematics()
         if kin is None:
             logger.error("No kinematics data for go_to_xy")
@@ -633,8 +487,10 @@ class HighLevelSimClient:
         else:
             raise ValueError("frame must be 'odom' or 'base_link'")
 
-        self._pid_pos_x._max_control = max_speed
-        self._pid_pos_y._max_control = max_speed
+        self._pid_pos_x.max_control = min(max_speed, self._max_velocity,
+                                         self._cascade.pid_configs['pid_pos_x']['max_control'])
+        self._pid_pos_y.max_control = min(max_speed, self._max_velocity,
+                                         self._cascade.pid_configs['pid_pos_y']['max_control'])
         
         #self.unlock_motors()
 
@@ -660,25 +516,12 @@ class HighLevelSimClient:
 
             tx, ty = self._target_position
             dist = math.hypot(tx - cx, ty - cy)
-            velocity = math.hypot(abs(self._prev_x), abs(self._prev_y))/50
-            if dist < 0.15: # and velocity < 0.1:
+            velocity = math.hypot(self._filtered_vx_world, self._filtered_vy_world)
+            if dist < 0.1: # and velocity < 0.1:
                 logger.info(f"Reached target: {x}, {y}")
                 print(f"[control] go to xy succeed x:{round(cx,2)} y:{round(cy,2)} velocity:{round(velocity,2)}")
                 return True
             
-            if prev_dist is not None:
-                if abs(dist - prev_dist) < 0.01 and dist > 0.5:
-                    logger.warning(f"Drone stuck! dist={dist:.2f}, resetting PIDs...")
-                    self._pid_pos_x.reset()
-                    self._pid_pos_y.reset()
-                    self._pid_vel_pitch.reset()
-                    self._pid_vel_roll.reset()
-                    prev_dist = None
-                    time.sleep(0.1)
-                    continue
-            
-            prev_dist = dist
-
             kin = self.get_sim_kinematics()
             if kin is not None:
                 cx = sim_to_api_distance(kin["location"][0])
@@ -711,7 +554,6 @@ class HighLevelSimClient:
         goal = self._wrap_pi(yaw)
 
         r, p, _ = self._rpy_vel_data
-        self._rpy_vel_data = (1500, 1500, r)
 
         timeout = 10.0
         start_time = time.monotonic()
@@ -899,228 +741,240 @@ class HighLevelSimClient:
         return True
     
     def takeoff(self) -> bool:
-        """Perform blocking takeoff to nominal hover altitude."""
-        print("\n[control] take off")
-
-        PERIOD = 0.05
-        MIN_H = 0.00
-        TAKEOFF_H = self._takeoff_height
-        Z_BIAS = 0.075
-        MAX_H = 5.00
-        REACH_COEF = 0.95
-        TIMEOUT_COEF = 10.0
-
-        if self._control_mode == "velocity":
-            kin = self.get_sim_kinematics()
-            if kin is not None:
-                cx = sim_to_api_distance(kin["location"][0])
-                cy = sim_to_api_distance(kin["location"][1])
-                self._target_position = (cx, cy)
-                self._control_mode = "position"
-                logger.info("takeoff: switched to position mode, locked current position")
-
-        h_now = self._get_height()
-        tgt = self._clamp_h(TAKEOFF_H, MIN_H, MAX_H)
-
-        self.set_target_height(tgt + Z_BIAS)
-
-        climb = max(0.0, tgt - h_now)
-        deadline = time.monotonic() + (TIMEOUT_COEF * climb if climb > 0.0 else TIMEOUT_COEF)
-
-        while True:
-            if self._is_abort:
-                self._is_abort = False
-                print("[control] take off aborted")
-                logger.info("takeoff: aborted")
-                return False
-            h = self._get_height()
-            if h >= REACH_COEF * tgt:
-                print("[control] take off succeed")
-                return True
-            if time.monotonic() >= deadline:
-                print("[control] take off failed")
-                return False
-            if not self._sleep_until(deadline, PERIOD):
-                print("[control] take off failed")
-                return False
+        """Take off to the drone preset's height above the launch ground."""
+        if not self._armed_flag:
+            logger.warning('takeoff requested while disarmed')
+            return False
+        if not self._althold_flag and not self.altholdOn():
+            return False
+        self.set_position_mode()
+        return self.setHeight(self._takeoff_height)
 
     def boarding(self) -> bool:
-        """Perform blocking landing sequence with stepwise descent."""
-        PERIOD = 0.05
-        MIN_H = 0.00
-        MAX_H = 5.00
-        STEP = 0.1
-        TIMEOUT_MIN = 15.0
-        TIMEOUT_COEF = 10.0
-
-        self._is_abort = False
-
-        print("\n[control] boarding")
-
-        if self._control_mode == "velocity":
-            kin = self.get_sim_kinematics()
-            if kin is not None:
-                cx = sim_to_api_distance(kin["location"][0])
-                cy = sim_to_api_distance(kin["location"][1])
-                self._target_position = (cx, cy)
-                self._control_mode = "position"
-                logger.info("boarding: switched to position mode, locked current position")
-
-        curr_cmd = float(getattr(self, "_target_height", 0.0))
-        curr_cmd = self._clamp_h(curr_cmd, MIN_H, MAX_H)
-
-        total_drop = max(0.0, curr_cmd - MIN_H)
-        deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * total_drop
-
-        while curr_cmd > MIN_H:
-            if self._is_abort:
-                self._is_abort = False
-                logger.info("boarding: aborted")
-                print("[control] boarding failed")
-                return False
-            curr_cmd = max(MIN_H, curr_cmd - STEP)
-            self.set_target_height(curr_cmd)
-            if time.monotonic() >= deadline:
-                print("[control] boarding failed")
-                return False
-            if not self._sleep_until(deadline, PERIOD):
-                print("[control] boarding failed")
-                return False
-
-        self._target_height = 0.0
-        print("[control] boarding succeed")
-        return True
+        """Descend in steps, then use the calibrated throttle landing ramp."""
+        if not self._armed_flag:
+            return True
+        if self._get_height() > 0.3 and not self.setHeight(0.2):
+            return False
+        self._descent_goal = None
+        config = self._control_config
+        start = previous = time.monotonic()
+        grounded_since = None
+        self._landing_throttle = float(config['throttle_landing_start_rc'])
+        try:
+            while time.monotonic() - start < config['landing_seconds']:
+                if self._is_abort or not self._simulator_alive:
+                    return False
+                now = time.monotonic()
+                dt, previous = now - previous, now
+                sample = self._latest_sample
+                if sample is None or now - sample.t > 0.5:
+                    return False
+                vz = sample.vz_world
+                if vz is None:
+                    return False
+                rate = config['throttle_landing_rc_per_second']
+                if vz < -config['throttle_landing_speed_limit']:
+                    self._landing_throttle = min(config['throttle_landing_start_rc'],
+                                                 self._landing_throttle + 4 * rate * dt)
+                else:
+                    self._landing_throttle = max(config['throttle_landing_end_rc'],
+                                                 self._landing_throttle - rate * dt)
+                grounded = (self._get_height() <= config['throttle_landing_ground_tolerance']
+                            and abs(vz) <= config['throttle_landing_ground_speed']
+                            and self._landing_throttle <= config['throttle_landing_end_rc'] + 50)
+                if grounded:
+                    grounded_since = grounded_since or now
+                    if now - grounded_since >= config['throttle_landing_ground_hold_seconds']:
+                        self.disarmDrone()
+                        self.altholdOff()
+                        return True
+                else:
+                    grounded_since = None
+                time.sleep(1 / config['kinematics_hz'])
+            return False
+        finally:
+            self._landing_throttle = None
+            if self._armed_flag and self._simulator_alive:
+                self.set_target_height(max(0.0, self._get_height()))
 
     def setHeight(self, target_height: float) -> bool:
-        """Move to target altitude in blocking mode."""
-        print(f"\n[control] set height: {round(target_height,2)}")
-
-        PERIOD = 0.05
-        MIN_H = 0.00
-        MAX_H = 5.00
-        STEP = 0.05
-        Z_BIAS = 0.075
-        REACH_COEF = 0.95
-        TIMEOUT_MIN = 15.0
-        TIMEOUT_COEF = 10.0
-
+        """Move to launch-relative height and wait for measured arrival."""
+        if not self._armed_flag or not self._simulator_alive:
+            return False
+        if not self._althold_flag and not self.altholdOn():
+            return False
         self._is_abort = False
-
-        if self._control_mode == "velocity":
-            kin = self.get_sim_kinematics()
-            if kin is not None:
-                cx = sim_to_api_distance(kin["location"][0])
-                cy = sim_to_api_distance(kin["location"][1])
-                self._target_position = (cx, cy)
-                self._control_mode = "position"
-                logger.info("setHeight: switched to position mode, locked current position")
-
-        tgt = self._clamp_h(float(target_height), MIN_H, MAX_H)
-        h0 = self._get_height()
-
-        if tgt >= h0:
-            self.set_target_height(tgt + Z_BIAS)
-            deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * max(0.0, tgt - h0)
-            while True:
-                if self._is_abort:
-                    self._is_abort = False
-                    logger.info("setHeight: aborted")
-                    print("[control] set height aborted")
-                    return False
-
-                h = self._get_height()
-                if h >= REACH_COEF * tgt:
-                    print("[control] set height succeed")
+        self.set_position_mode()
+        start_height = self._get_height()
+        self.set_target_height(target_height)
+        timeout = max(15.0, 10.0 * abs(target_height - start_height) + 5.0)
+        deadline = time.monotonic() + timeout
+        stable_since = None
+        while time.monotonic() < deadline:
+            if self._is_abort or not self._simulator_alive:
+                self._is_abort = False
+                return False
+            speed = abs(self._latest_sample.vz_world or 0.0) if self._latest_sample else float('inf')
+            if abs(self._get_height() - target_height) <= 0.05 and speed <= 0.10:
+                stable_since = stable_since or time.monotonic()
+                if time.monotonic() - stable_since >= 0.6:
                     return True
-                if time.monotonic() >= deadline:
-                    print("[control] set height failed")
-                    return False
-                if not self._sleep_until(deadline, PERIOD):
-                    print("[control] set height failed")
-                    return False
-        else:
-            curr_cmd = float(getattr(self, "_target_height", h0))
-            curr_cmd = self._clamp_h(curr_cmd, MIN_H, MAX_H)
-            deadline = time.monotonic() + TIMEOUT_MIN + TIMEOUT_COEF * max(0.0, curr_cmd - tgt)
+            else:
+                stable_since = None
+            time.sleep(0.02)
+        return False
 
-            while curr_cmd > tgt:
-                if self._is_abort:
-                    self._is_abort = False
-                    logger.info("setHeight: aborted")
-                    print("[control] set height failed")
-                    return False
-                curr_cmd = max(tgt, curr_cmd - STEP)
-                self.set_target_height(curr_cmd)
-                if time.monotonic() >= deadline:
-                    return False
-                if not self._sleep_until(deadline, PERIOD):
-                    print("[control] set height failed")
-                    return False
-        print("[control] set height succeed")
-        return True
-    
     def set_camera_id(self, new_id: int):
         """Set active simulator camera identifier."""
         with self._client_lock:
             self.camera_id = new_id
     
     def sim_kinematics_callback(self):
-        """Refresh simulator kinematics, image, and range cache."""
+        """Acquire one fresh world-frame velocity sample and advance control."""
         if not self._simulator_alive:
             return
-        
-        should_check_death = False
-        
         try:
-            with self._client_lock:
-                if not hasattr(self, '_client') or self._client is None:
-                    self._consecutive_errors += 1
-                    should_check_death = True
-                else:
-                    try:
-                        self._sim_kinematics = self._client.get_kinametics_data()
-                        self._sim_img = self._client.get_camera_capture(camera_id=self.camera_id)
-                        self._sim_ultrasonic = self._client.get_range_data(
-                            rangefinder_id=0,
-                            range_min=0.15,
-                            range_max=4,
-                            is_clear=True,
-                            range_error=0.0003
-                        ) * 100
-                        
-                        self._consecutive_errors = 0
-                        self._simulator_alive = True
-                        
-                    except Exception as e:
-                        self._consecutive_errors += 1
-                        logger.warning(f"Error getting simulator data: {e}")
-                        should_check_death = True
-                        
-        except Exception as e:
+            kin = self._kinematics_client.get_kinametics_data()
+            sample = sample_from_kinematics(kin, time.monotonic())
+            with self._control_lock:
+                self._sim_kinematics = kin
+                self._latest_sample = sample
+                if not self._reference_initialized:
+                    self._z_bias = sample.z
+                    self._target_position = (sample.x, sample.y)
+                    self._target_yaw = sample.yaw
+                    self._target_height = 0.0
+                    self._cascade.z_bias = sample.z
+                    self._cascade.reset(sample)
+                    self._reference_initialized = True
+                self._altitude = sample.z - self._z_bias
+            self._consecutive_errors = 0
+            self._control_step()
+        except Exception as exc:
             self._consecutive_errors += 1
-            logger.error(f"Critical error in sim_kinematics_callback: {e}")
-            should_check_death = True
-        
-        if should_check_death:
+            logger.warning('Kinematics update failed: %s', exc)
             self._check_simulator_death()
-    
+
+    def _sensor_callback(self):
+        """Refresh camera/range independently from flight-control RPC."""
+        if not self._simulator_alive:
+            return
+        try:
+            self._sim_img = self._sensors_client.get_camera_capture(camera_id=self.camera_id)
+            self._sim_ultrasonic = self._sensors_client.get_range_data(
+                rangefinder_id=0, range_min=0.15, range_max=4,
+                is_clear=True, range_error=0.0003) * 100
+            self.image_processing_callback()
+        except Exception as exc:
+            logger.warning('Sensor update failed: %s', exc)
+
+    def _control_step(self):
+        if not self._simulator_alive or self._motors_locked:
+            return
+        with self._control_lock:
+            sample = self._latest_sample
+            if sample is None or sample.t == self._last_control_sample_t:
+                return
+            self._update_descent(sample)
+            config = self._cascade.config
+            config['max_xy_speed'] = self._max_velocity
+            config['max_xy_acceleration'] = self._max_acceleration
+            config['velocity_filter_alpha'] = self._vel_filter_alpha
+            config['direction'] = self.get_direction_coefficients()
+            self._cascade.z_bias = self._z_bias
+            self._cascade.base_throttle_rc = self._base_throttle_hover
+            velocity = self._target_velocity
+            if self._control_mode == 'velocity' and self._velocity_frame == 'odom':
+                vx, vy = velocity
+                cs, sn = math.cos(sample.yaw), math.sin(sample.yaw)
+                velocity = (vx * cs - vy * sn, vx * sn + vy * cs)
+            target = {'height': self._target_height, 'height_relative': True,
+                      'yaw': self._target_yaw, 'position': self._target_position,
+                      'velocity': velocity, 'height_enabled': self._althold_flag and self._landing_throttle is None,
+                      'yaw_enabled': self._yaw_mode == 'position'}
+            result = self._cascade.step(sample, self._control_mode, target)
+            self._last_control_sample_t = sample.t
+            yaw_pwm = result['rc_yaw'] if self._yaw_mode == 'position' else self._rpy_vel_data[2]
+            self._rpy_vel_data = (result['rc_roll'], result['rc_pitch'], yaw_pwm)
+            if self._landing_throttle is not None:
+                self._throttle_data = int(self._landing_throttle)
+            elif self._althold_flag:
+                self._throttle_data = result['rc_throttle']
+            self._filtered_vx_world = self._cascade.filtered_vx
+            self._filtered_vy_world = self._cascade.filtered_vy
+            self._prev_x, self._prev_y = sample.x, sample.y
+            self._control_telemetry = result
+
+    def get_control_telemetry(self) -> dict:
+        """Return the last cascade outputs, errors, speeds and accelerations."""
+        with self._control_lock:
+            return dict(self._control_telemetry)
+
+    def _update_descent(self, sample):
+        """Advance 5 cm steps using measured progress and vertical speed."""
+        if self._descent_goal is None:
+            return
+        c = self._control_config
+        actual = sample.z - self._z_bias
+        goal = self._descent_goal
+        if actual <= goal + c['height_descent_reach_tolerance']:
+            self._target_height = goal
+            self._descent_goal = None
+            return
+        now = sample.t
+        first = self._descent_command is None
+        elapsed = 0 if first else now - self._descent_step_started
+        speed = abs(sample.vz_world or 0.0)
+        progressed = (not first and actual <= self._descent_step_origin - c['height_descent_step'] * 0.6)
+        reached = not first and abs(actual-self._descent_command) <= c['height_descent_reach_tolerance']
+        ready = first or (elapsed >= c['height_descent_settle_seconds'] and
+                          (reached or progressed) and speed <= c['height_descent_max_speed'])
+        stalled = not first and elapsed >= c['height_descent_step_timeout_seconds'] and speed <= c['height_descent_max_speed']
+        if ready or stalled:
+            command = max(goal, actual - c['height_descent_step']) if first else min(
+                self._descent_command, max(goal - c['height_descent_max_target_undershoot'],
+                    actual - c['height_descent_max_command_gap'],
+                    min(actual - c['height_descent_step'], self._descent_command - c['height_descent_step'])))
+            self._target_height = command
+            self._descent_command = command
+            self._descent_step_started = now
+            self._descent_step_origin = actual
+            self._pid_height.reset()
+
     def get_sim_kinematics(self):
         """Return cached simulator kinematics dictionary."""
         return self._sim_kinematics
     
     def transmit_rc_to_sim(self):
         """Send current RC command packet to flight controller."""
-        if not self._simulator_alive:
+        if self._rc_timer_suspended or not self._simulator_alive:
             return
 
         try:
-            roll, pitch, yaw = self._rpy_vel_data
-            raw_rc = [roll, pitch, self._throttle_data, yaw, self._arm_data, self._fliyng_mode, self._nav_mode]
-            raw_rc = self.clamp_rc_list(raw_rc)
-            msg = self._control.send_RAW_RC(raw_rc)
-            data_handler = self._control.receive_msg()
-        except Exception:
-            pass
+            with self._msp_io_lock:
+                if self._arming_rc_frame is not None:
+                    raw_rc = self._arming_rc_frame
+                else:
+                    raw_rc = self._current_rc_frame()
+
+                self._control.send_RAW_RC(self.clamp_rc_list(raw_rc))
+                self._control.receive_msg()
+        except Exception as exc:
+            logger.warning("Could not send RC frame: %s", exc)
+
+    def _current_rc_frame(self) -> list:
+        """Build the normal seven-channel RC frame from current control state."""
+        roll, pitch, yaw = self._rpy_vel_data
+        return [
+            roll,
+            pitch,
+            self._throttle_data,
+            yaw,
+            self._arm_data,
+            self._fliyng_mode,
+            self._nav_mode,
+        ]
     
     def setVelXY(self, x, y):
         """Deprecated wrapper around set_velocity_xy."""
@@ -1132,30 +986,102 @@ class HighLevelSimClient:
         self.set_velocity_xy(x, y, frame="base_link")
     
     def armDrone(self):
-        """Arm drone and start altitude control timer."""
-        self._throttle_data = 1000
-        
-        #self._pid_height_pos.reset()
-        #self._pid_height_vel.reset()
-        
+        """Arm with the raw-RC sequence verified by ``arm_drone_debug.py``."""
+        if self._armed_flag:
+            return True
+
+        print("[info] Sending ARM RC sequence...")
         self._target_height_vel = 0.0
-        
-        self._armed_flag = True
-        self._arm_data = 2000
+        self._rc_timer_suspended = True
 
-        time.sleep(0.2)
-        #self._height_pos_timer.start()
-        #self._height_vel_timer.start()
-        #self._height_pos_timer.start()
-        #self._height_vel_timer.start()
+        try:
+            # Keep the same MSP traffic as arm_drone_debug.py.  The normal
+            # RC timer is paused, rather than stopped, because LoopingTimer
+            # instances cannot be started again after stop().
+            self._send_arm_frame(self._ARM_RESET_FRAME, "reset/disarm")
+            time.sleep(self._ARM_SETTLE_SECONDS)
 
-        self._height_timer.start()
+            self._send_arm_frame(self._ARM_SWITCH_FRAME, "arm switch on")
+
+            # INAV must immediately receive neutral roll/pitch/yaw with the
+            # ARM switch high; this is the sequence used by input_driver.py.
+            self._rpy_vel_data = (1500, 1500, 1500)
+            self._throttle_data = 1000
+            self._arm_data = 2000
+            self._fliyng_mode = 1000
+            self._nav_mode = 1000
+            self._send_arm_frame(self._ARMED_NEUTRAL_FRAME, "armed neutral")
+
+            # The debug script transmits this frame synchronously at 20 Hz.
+            # Do the same here: the background RC timer may be stopped when
+            # the simulator RPC becomes unavailable, but that must not cut
+            # short the MSP arming sequence.
+            self._hold_rc_frame(
+                self._ARMED_NEUTRAL_FRAME,
+                duration=self._ARM_SETTLE_SECONDS,
+                frequency=self._ARM_FRAME_FREQUENCY,
+            )
+            self._armed_flag = True
+            # Height control is allowed as soon as the ARM sequence has
+            # completed, including when the caller intentionally keeps ANGLE.
+            self.unlock_motors()
+        except Exception:
+            self._armed_flag = False
+            self._arm_data = 1000
+            raise
+        finally:
+            self._arming_rc_frame = None
+            self._rc_timer_suspended = False
+
+        print("[info] ARM RC sequence sent")
+        return True
+
+    def _send_rc_frame(self, raw_rc: Iterable):
+        """Synchronously send one RC frame and return its MSP response."""
+        with self._msp_io_lock:
+            if not self._control.send_RAW_RC(self.clamp_rc_list(raw_rc)):
+                raise ConnectionError("MSP did not accept the RC frame")
+            response = self._control.receive_msg()
+            if response is None:
+                raise ConnectionError("MSP did not return a response to the RC frame")
+            return response
+
+    def _send_arm_frame(self, raw_rc: Iterable, label: str) -> None:
+        """Send a key arming frame and print its MSP response metadata."""
+        print(f"[rc] {label}: {list(raw_rc)}")
+        response = self._send_rc_frame(raw_rc)
+        print(
+            "[msp] response: "
+            f"code={response.get('code')}, "
+            f"crc_error={response.get('crcError')}, "
+            f"packet_error={response.get('packet_error')}"
+        )
+
+    def _hold_rc_frame(self, raw_rc: Iterable, *, duration: float, frequency: float) -> None:
+        """Synchronously retain an RC frame for a fixed interval.
+
+        This deliberately does not use ``transmit_rc_to_sim``: that callback
+        is coupled to simulator-RPC liveness, while arming is an MSP-only
+        operation and must complete even when RPC data is temporarily absent.
+        """
+        if duration < 0:
+            raise ValueError("duration must not be negative")
+        if frequency <= 0:
+            raise ValueError("frequency must be positive")
+
+        deadline = time.monotonic() + duration
+        period = 1.0 / frequency
+        while time.monotonic() < deadline:
+            self._send_rc_frame(raw_rc)
+            time.sleep(period)
 
     def disarmDrone(self):
         """Disarm drone and reset throttle outputs."""
+        self._arming_rc_frame = None
         self._armed_flag = False
         self._arm_data = 1000
         self._throttle_data = 1000
+        self.lock_motors()
         
     
     def initDrone(self):
@@ -1169,8 +1095,9 @@ class HighLevelSimClient:
     def posholdOn(self):
         """Enable POSHOLD-related channel configuration."""
         self._poshold_flag = True
+        self._althold_flag = False
         self._nav_mode = 1500
-        self._base_throttle_hover = 1500
+        self._base_throttle_hover = getattr(self, "_calibrated_base_throttle", 1500)
         self.unlock_motors()
         
 
@@ -1183,104 +1110,140 @@ class HighLevelSimClient:
         self._pid_height.reset()
         self.lock_motors()
 
-    def add_range_for_althold(self, mode_id=3, channel_index=2, range_start=1250, range_end=1350):
-        """Add NAV ALTHOLD mode range entry in MSP configuration."""
-        def encode_range_value(us_value):
-            """Encode microseconds range value to MSP format."""
-            return int((us_value - 900) / 25)
+    def _read_msp_mode_ranges(self) -> None:
+        """Request and decode the current MSP mode-range table."""
+        with self._msp_io_lock:
+            if not self._control.send_RAW_msg(MSPCodes["MSP_MODE_RANGES"], data=[]):
+                raise ConnectionError("MSP_MODE_RANGES was not sent")
+            response = self._control.receive_msg()
 
-        def find_mode_ranges(msp, mode_id, channel_index):
-            """Find mode range entries for mode and AUX channel."""
-            results = []
-            for i, mr in enumerate(msp.MODE_RANGES):
-                if (mr['id'] == mode_id and
-                    mr['auxChannelIndex'] == channel_index):
-                    results.append((i, mr))
-            return results
+            if response is None:
+                raise ConnectionError("MSP_MODE_RANGES did not return a response")
+            if response.get("crcError") or response.get("packet_error"):
+                raise RuntimeError("MSP_MODE_RANGES returned an invalid response")
 
-        def find_first_empty_range(msp):
-            """Find first unused mode range entry index."""
-            for i, mr in enumerate(msp.MODE_RANGES):
-                if mr['id'] == 0 and mr['range']['start'] == 900 and mr['range']['end'] == 900:
-                    return i
-            return None
+            result = self._control.process_recv_data(response)
+            if result is None or result < 0:
+                raise RuntimeError(f"MSP_MODE_RANGES response was not decoded: {result}")
+
+    def _write_msp_configuration(self, message_name: str, data: list) -> None:
+        """Send one MSP configuration write and consume its ACK."""
+        with self._msp_io_lock:
+            if not self._control.send_RAW_msg(MSPCodes[message_name], data=data):
+                raise ConnectionError(f"MSP command {message_name} was not sent")
+            response = self._control.receive_msg()
+            if response is None:
+                raise ConnectionError(f"MSP command {message_name} did not return an ACK")
+            if response.get("crcError") or response.get("packet_error"):
+                raise RuntimeError(f"MSP command {message_name} returned an invalid ACK")
+            result = self._control.process_recv_data(response)
+            if result is None or result < 0:
+                raise RuntimeError(f"MSP command {message_name} ACK was not decoded: {result}")
+
+    def add_range_for_althold(
+        self,
+        mode_id: int = _ALTHOLD_MODE_ID,
+        channel_index: int = _ALTHOLD_AUX_CHANNEL_INDEX,
+        range_start: int = _ALTHOLD_RANGE_START,
+        range_end: int = _ALTHOLD_RANGE_END,
+    ) -> bool:
+        """Configure NAV ALTHOLD on AUX3 for the current controller session.
+
+        ``MSP_SET_MODE_RANGE`` updates the active INAV configuration
+        immediately.  Do not follow it with ``MSP_EEPROM_WRITE``: the
+        simulator's controller does not persist this write reliably and its
+        MSP stream becomes unusable for the subsequent ARM sequence.  The
+        range is therefore installed and verified again on every connection.
+        """
+        def find_mode_ranges():
+            return [
+                (index, mode_range)
+                for index, mode_range in enumerate(self._control.MODE_RANGES)
+                if mode_range["id"] == mode_id
+                and mode_range["auxChannelIndex"] == channel_index
+            ]
 
         try:
-            self._control.send_RAW_msg(MSPCodes['MSP_MODE_RANGES'], data=[])
-            data_handler = self._control.receive_msg()
-            self._control.process_recv_data(data_handler)
-
+            self._read_msp_mode_ranges()
             if not self._control.MODE_RANGES:
-                logger.warning("MODE_RANGES РїСѓСЃС‚!")
+                logger.warning("MSP_MODE_RANGES returned no configuration entries")
                 return False
 
-            existing = find_mode_ranges(self._control, mode_id, channel_index)
-            logger.info(f"РќР°Р№РґРµРЅРѕ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёС… РґРёР°РїР°Р·РѕРЅРѕРІ NAV ALTHOLD РЅР° CH{5 + channel_index}: {len(existing)}")
-            for idx, mr in existing:
-                logger.info(f"  [{idx}] {mr['range']['start']}-{mr['range']['end']}")
+            existing = find_mode_ranges()
+            if any(
+                mode_range["range"]["start"] == range_start
+                and mode_range["range"]["end"] == range_end
+                for _, mode_range in existing
+            ):
+                logger.info("NAV ALTHOLD range is already configured on AUX3")
+                return True
 
-            for _, mr in existing:
-                if mr['range']['start'] == range_start and mr['range']['end'] == range_end:
-                    logger.info(f"Р”РёР°РїР°Р·РѕРЅ {range_start}-{range_end} СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚!")
-                    return True
-
-            empty_index = find_first_empty_range(self._control)
+            empty_index = next(
+                (
+                    index
+                    for index, mode_range in enumerate(self._control.MODE_RANGES)
+                    if mode_range["id"] == 0
+                    and mode_range["range"] == {"start": 900, "end": 900}
+                ),
+                None,
+            )
             if empty_index is None:
-                logger.warning("РќРµС‚ СЃРІРѕР±РѕРґРЅС‹С… range entry! РњР°СЃСЃРёРІ РїРѕР»РЅРѕСЃС‚СЊСЋ Р·Р°РїРѕР»РЅРµРЅ.")
-                logger.warning(f"Р’СЃРµРіРѕ entries: {len(self._control.MODE_RANGES)}")
+                logger.warning("No free MSP mode-range entry is available for NAV ALTHOLD")
                 return False
-
-            logger.info(f"РЎРІРѕР±РѕРґРЅС‹Р№ range entry РЅР°Р№РґРµРЅ: index={empty_index}")
 
             payload = [
                 empty_index,
-                mode_id,                             # modeId NAV ALTHOLD
-                channel_index,                       # auxChannelIndex
-                encode_range_value(range_start),     # start encoded
-                encode_range_value(range_end),       # end encoded
+                mode_id,
+                channel_index,
+                (range_start - 900) // 25,
+                (range_end - 900) // 25,
             ]
-
-            logger.info(f"\nР”РѕР±Р°РІР»СЏСЋ РґРёР°РїР°Р·РѕРЅ: {range_start}-{range_end}")
-            logger.info(f"  rangeIndex     = {payload[0]}")
-            logger.info(f"  modeId         = {payload[1]} (NAV ALTHOLD)")
-            logger.info(f"  auxChannelIndex= {payload[2]} (CH{5 + payload[2]})")
-            logger.info(f"  start          = {range_start} (encoded: {payload[3]})")
-            logger.info(f"  end            = {range_end} (encoded: {payload[4]})")
-
-            self._control.send_RAW_msg(MSPCodes['MSP_SET_MODE_RANGE'], data=payload)
+            self._write_msp_configuration("MSP_SET_MODE_RANGE", payload)
             time.sleep(0.3)
+            self._read_msp_mode_ranges()
 
-            logger.info("РЎРѕС…СЂР°РЅСЏСЋ РІ EEPROM...")
-            self._control.send_RAW_msg(MSPCodes['MSP_EEPROM_WRITE'], data=[])
-            time.sleep(0.5)
-
-            self._control.send_RAW_msg(MSPCodes['MSP_MODE_RANGES'], data=[])
-            data_handler = self._control.receive_msg()
-            self._control.process_recv_data(data_handler)
-
-            updated = find_mode_ranges(self._control, mode_id, channel_index)
-            logger.info(f"\nР’СЃРµ РґРёР°РїР°Р·РѕРЅС‹ NAV ALTHOLD РЅР° CH{5 + channel_index}:")
-            for idx, mr in updated:
-                logger.info(f"  [{idx}] {mr['range']['start']}-{mr['range']['end']}")
-
-            for _, mr in updated:
-                if mr['range']['start'] == range_start and mr['range']['end'] == range_end:
-                    logger.info("РЈРЎРџР•РҐ! РќРѕРІС‹Р№ РґРёР°РїР°Р·РѕРЅ РґРѕР±Р°РІР»РµРЅ!")
-                    return True
-
-            logger.warning("Р’РќРРњРђРќРР•: РґРёР°РїР°Р·РѕРЅ РЅРµ РїРѕСЏРІРёР»СЃСЏ РїРѕСЃР»Рµ СЃРѕС…СЂР°РЅРµРЅРёСЏ!")
+            configured = any(
+                mode_range["range"]["start"] == range_start
+                and mode_range["range"]["end"] == range_end
+                for _, mode_range in find_mode_ranges()
+            )
+            if configured:
+                logger.info(
+                    "NAV ALTHOLD range configured for this session: AUX3 = %s-%s",
+                    range_start,
+                    range_end,
+                )
+            else:
+                logger.error("NAV ALTHOLD range was not present after MSP_SET_MODE_RANGE")
+            return configured
+        except Exception as exc:
+            logger.error("Could not configure NAV ALTHOLD range: %s", exc)
             return False
 
-        except Exception as e:
-            logger.error(f"РћС€РёР±РєР° РїСЂРё РґРѕР±Р°РІР»РµРЅРёРё РґРёР°РїР°Р·РѕРЅР° РґР»СЏ ALTHOLD: {e}")
+    def altholdOn(self) -> bool:
+        """Enable NAV ALTHOLD after arming and start the altitude controller."""
+        if not self._armed_flag:
+            logger.warning("NAV ALTHOLD was requested while the drone is disarmed")
+            print("[warning] NAV ALTHOLD requires an armed drone")
             return False
 
-    def altholdOn(self):
-        """Enable NAV ALTHOLD channel value and unlock motors."""
+        if not self._althold_range_configured:
+            logger.warning("NAV ALTHOLD was requested but its MSP mode range is not configured")
+            print("[warning] NAV ALTHOLD mode range is not configured")
+            return False
+
+        self._poshold_flag = False
         self._althold_flag = True
-        self._nav_mode = 1300
-        self._base_throttle_hover = 1500
+        self._nav_mode = self._ALTHOLD_AUX_VALUE
+        self._base_throttle_hover = getattr(self, "_calibrated_base_throttle", 1500)
         self.unlock_motors()
+        self._send_rc_frame(self._current_rc_frame())
+        if not self._height_timer_started:
+            if not hasattr(self, "_cascade"):
+                self._height_timer.start()
+            self._height_timer_started = True
+        print("[info] NAV ALTHOLD enabled (AUX3 = 1300)")
+        return True
 
     def altholdOff(self):
         """Disable NAV ALTHOLD channel value and lock motors."""
@@ -1304,10 +1267,19 @@ class HighLevelSimClient:
         return map(lambda x: round(x, 3), iterable)
 
     def set_target_height(self, height):
-        """Set altitude target and reset height PID state."""
-        self._target_height = height
-        self._pid_height.reset()
-    
+        """Set height above the connection's launch ground; descend in 5 cm steps."""
+        height = float(height)
+        if not math.isfinite(height) or height < 0:
+            raise ValueError('Height must be finite and nonnegative')
+        with self._control_lock:
+            self._descent_command = None
+            self._descent_goal = height if height < self._get_height() else None
+            if self._descent_goal is None:
+                self._target_height = height
+                self._pid_height.reset()
+            elif self._latest_sample is not None:
+                self._update_descent(self._latest_sample)
+
     def getImage(self):
         """Return latest simulator image frame."""
         with self._client_lock:
@@ -1390,58 +1362,15 @@ class HighLevelSimClient:
                     logger.error(f"Error in death callback: {e}")
     
     def _stop_all_timers(self):
-        """Stop active timers except the current execution thread timer."""
-        import threading
-        current_thread = threading.current_thread()
-        
-        try:
-            if hasattr(self, 'height_pos_timer') and self._height_pos_timer is not None:
-                if self._height_pos_timer._thread != current_thread:
-                    self._height_pos_timer.stop()
-        except Exception:
-            pass
-
-        try:
-            if hasattr(self, 'height_vel_timer') and self._height_vel_timer is not None:
-                if self._height_vel_timer._thread != current_thread:
-                    self._height_vel_timer.stop()
-        except Exception:
-            pass
-            
-        try:
-            if hasattr(self, '_rc_timer') and self._rc_timer is not None:
-                if self._rc_timer._thread != current_thread:
-                    self._rc_timer.stop()
-        except Exception:
-            pass
-            
-        try:
-            if hasattr(self, '_sim_kinematics_timer') and self._sim_kinematics_timer is not None:
-                if self._sim_kinematics_timer._thread != current_thread:
-                    self._sim_kinematics_timer.stop()
-        except Exception:
-            pass
-            
-        try:
-            if hasattr(self, '_image_processing_timer') and self._image_processing_timer is not None:
-                if self._image_processing_timer._thread != current_thread:
-                    self._image_processing_timer.stop()
-        except Exception:
-            pass
-            
-        try:
-            if hasattr(self, '_yaw_timer') and self._yaw_timer is not None:
-                if self._yaw_timer._thread != current_thread:
-                    self._yaw_timer.stop()
-        except Exception:
-            pass
-            
-        try:
-            if hasattr(self, '_velocity_timer') and self._velocity_timer is not None:
-                if self._velocity_timer._thread != current_thread:
-                    self._velocity_timer.stop()
-        except Exception:
-            pass
+        """Stop every started timer without joining the caller's own thread."""
+        current = threading.current_thread()
+        for name in ('_rc_timer', '_sim_kinematics_timer', '_image_processing_timer',
+                     '_yaw_timer', '_position_timer', '_velocity_timer', '_height_timer'):
+            timer = getattr(self, name, None)
+            if timer is not None:
+                timer._stop_event.set()
+                if timer._thread is not current and timer._thread.is_alive():
+                    timer._thread.join(timeout=3)
 
     def abort(self):
         """Abort active blocking operation and freeze current XY target."""
@@ -1462,3 +1391,7 @@ class HighLevelSimClient:
     def stopGoToXY(self):
         """Compatibility wrapper around stop_go_to_xy."""
         self.stop_go_to_xy()
+
+
+# Both names are supported; the historical class name remains unchanged.
+HighLevelClient = HighLevelSimClient

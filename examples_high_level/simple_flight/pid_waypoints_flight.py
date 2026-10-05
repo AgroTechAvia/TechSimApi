@@ -3,7 +3,7 @@ from agrotechsimapi import HighLevelSimClient, PID
 import time
 
 ip = "127.0.0.1"
-port = "1233"
+port = 5762
 
 
 def main():
@@ -64,3 +64,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

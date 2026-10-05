@@ -5,15 +5,16 @@ import time
 import math
 
 ip = '127.0.0.1'
-port = "1233"
+port = 5762
 
 
 def main():
 
-    client = HighLevelSimClient()
+    client = HighLevelSimClient(drone_name = "DEFAULT")
     # подключение
     client.connect(ip, port)
     # взлет
+    client.armDrone()
     client.takeoff()
     # устанавливаем целевую высоту
     client.setHeight(1.5) 
