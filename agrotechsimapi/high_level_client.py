@@ -2,7 +2,7 @@
 from inavmspapi import MultirotorControl
 from inavmspapi.transmitter import TCPTransmitter
 from inavmspapi.msp_codes import MSPCodes
-from agrotechsimapi.client import SimClient
+from agrotechsimapi.client import PointCloud, SimClient
 
 from agrotechsimapi.pid import PID, AdaptivePID
 from typing import Dict, Iterable, Optional, Tuple, Literal, Union
@@ -653,6 +653,28 @@ class HighLevelSimClient:
             )
 
         return np.asarray(scan, dtype=float)
+
+    def get_lidar_point_cloud(
+        self,
+        angle_below_zero: float = np.deg2rad(15.0),
+        angle_above_zero: float = np.deg2rad(15.0),
+        range_min: float = 0.1,
+        range_max: float = 100.0,
+        channel_count: int = 16,
+        points_per_channel: int = 512,
+    ) -> PointCloud:
+        """Acquire one organized sensor-local 3D lidar frame."""
+        with self._client_lock:
+            if not hasattr(self, "_client") or self._client is None:
+                raise RuntimeError("Low-level simulator client is not connected")
+            return self._client.get_lidar_point_cloud(
+                angle_below_zero=angle_below_zero,
+                angle_above_zero=angle_above_zero,
+                range_min=range_min,
+                range_max=range_max,
+                channel_count=channel_count,
+                points_per_channel=points_per_channel,
+            )
 
     def getLidarScan(
         self,

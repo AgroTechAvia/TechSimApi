@@ -4,6 +4,7 @@ from importlib import import_module
 _EXPORTS = {
     'SimClient': ('client', 'SimClient'),
     'CaptureType': ('client', 'CaptureType'),
+    'PointCloud': ('client', 'PointCloud'),
     'PID': ('pid', 'PID'), 'AdaptivePID': ('pid', 'AdaptivePID'),
     'HighLevelSimClient': ('high_level_client', 'HighLevelSimClient'),
     'HighLevelClient': ('high_level_client', 'HighLevelSimClient'),

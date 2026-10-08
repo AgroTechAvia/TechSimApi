@@ -54,6 +54,9 @@ dependencies = [
     "inavmspapi",
 ]
 
+[project.optional-dependencies]
+lidar = ["open3d"]
+
 [project.urls]
 Homepage = "https://github.com/AgroTechAvia/TechSimApi"
 Repository = "https://github.com/AgroTechAvia/TechSimApi"

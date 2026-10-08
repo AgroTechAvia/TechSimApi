@@ -2,7 +2,9 @@ import msgpackrpc
 import cv2
 import numpy as np
 import random
+from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Mapping, Tuple
 
 import asyncio
 import threading
@@ -21,6 +23,201 @@ class CaptureType(Enum):
     spectrum_R = 7
     spectrum_G = 8
     spectrum_B = 9
+
+
+@dataclass(frozen=True)
+class PointCloud:
+    """One organized 3D lidar frame in the sensor-local ROS FLU coordinate system.
+
+    ``points`` has shape ``(channel_count, points_per_channel, 3)`` and stores
+    metres. Invalid returns contain NaN coordinates and are marked by ``valid``.
+    The binary layout metadata mirrors ``sensor_msgs/msg/PointCloud2`` so that
+    ROS 2 adapters can reuse ``data``, ``fields``, ``point_step`` and
+    ``row_step`` without coordinate conversion or repacking. The mounting
+    orientation is an ``(x, y, z, w)`` quaternion from lidar frame to body frame.
+    """
+
+    points: np.ndarray
+    intensity: np.ndarray
+    ring: np.ndarray
+    return_type: np.ndarray
+    valid: np.ndarray
+    time_offset_ns: np.ndarray
+    schema_version: int
+    sensor_id: int
+    sensor_position_body: np.ndarray
+    sensor_orientation_body: np.ndarray
+    timestamp_ns: int
+    sequence: int
+    frame_id: str
+    scan_duration_ns: int
+    fields: Tuple[Mapping[str, Any], ...]
+    is_bigendian: bool
+    point_step: int
+    row_step: int
+    data: bytes
+    is_dense: bool
+    valid_point_count: int
+    acquisition_deadline_missed: bool
+
+    @property
+    def channel_count(self) -> int:
+        return int(self.points.shape[0])
+
+    @property
+    def points_per_channel(self) -> int:
+        return int(self.points.shape[1])
+
+    @property
+    def valid_points(self) -> np.ndarray:
+        """Return valid XYZ points flattened to ``(N, 3)``."""
+        return self.points[self.valid]
+
+
+_POINT_CLOUD_FIELD_LAYOUT = {
+    "x": (0, 7),
+    "y": (4, 7),
+    "z": (8, 7),
+    "intensity": (12, 7),
+    "ring": (16, 4),
+    "return_type": (18, 2),
+    "valid": (19, 2),
+    "time_offset_ns": (20, 6),
+}
+
+_POINT_CLOUD_RESPONSE_KEYS = (
+    "success", "error", "schema_version", "sensor_id", "sequence", "frame_id",
+    "stamp_sec", "stamp_nanosec", "scan_duration_ns", "height", "width", "fields",
+    "is_bigendian", "point_step", "row_step", "data", "is_dense",
+    "valid_point_count", "acquisition_deadline_missed",
+)
+_POINT_CLOUD_RESPONSE_KEYS_V2 = _POINT_CLOUD_RESPONSE_KEYS + (
+    "sensor_position_body", "sensor_orientation_body",
+)
+_POINT_CLOUD_FIELD_KEYS = ("name", "offset", "datatype", "count")
+
+
+def _string_key_mapping(value, sequence_keys=None):
+    if sequence_keys is not None and isinstance(value, (list, tuple)):
+        if len(value) != len(sequence_keys):
+            raise RuntimeError("Incompatible simulator RPC response array length")
+        value = dict(zip(sequence_keys, value))
+    if not isinstance(value, Mapping):
+        raise RuntimeError(
+            "Incompatible simulator RPC response: point cloud must be a map"
+        )
+    return {
+        key.decode("utf-8") if isinstance(key, bytes) else key: item
+        for key, item in value.items()
+    }
+
+
+def _decode_point_cloud(response) -> PointCloud:
+    sequence_keys = _POINT_CLOUD_RESPONSE_KEYS
+    if isinstance(response, (list, tuple)) and len(response) == len(_POINT_CLOUD_RESPONSE_KEYS_V2):
+        sequence_keys = _POINT_CLOUD_RESPONSE_KEYS_V2
+    response = _string_key_mapping(response, sequence_keys)
+    if not response.get("success", False):
+        error = response.get("error", "unknown simulator error")
+        if isinstance(error, bytes):
+            error = error.decode("utf-8", errors="replace")
+        raise RuntimeError(f"3D lidar scan failed: {error}")
+
+    schema_version = int(response.get("schema_version", -1))
+    if schema_version not in (1, 2):
+        raise RuntimeError(
+            "Unsupported 3D lidar point-cloud schema version: "
+            f"{response.get('schema_version')!r}"
+        )
+
+    height = int(response["height"])
+    width = int(response["width"])
+    point_step = int(response["point_step"])
+    row_step = int(response["row_step"])
+    is_bigendian = bool(response["is_bigendian"])
+    if height <= 0 or width <= 0 or point_step != 24 or row_step < width * point_step:
+        raise RuntimeError("Invalid 3D lidar point-cloud dimensions or strides")
+
+    fields = tuple(
+        _string_key_mapping(field, _POINT_CLOUD_FIELD_KEYS)
+        for field in response["fields"]
+    )
+    fields = tuple({
+        **field,
+        "name": field["name"].decode("utf-8")
+        if isinstance(field["name"], bytes) else field["name"],
+    } for field in fields)
+    actual_layout = {
+        str(field["name"]): (int(field["offset"]), int(field["datatype"]))
+        for field in fields
+    }
+    if any(actual_layout.get(name) != layout for name, layout in _POINT_CLOUD_FIELD_LAYOUT.items()):
+        raise RuntimeError("Incompatible 3D lidar PointCloud2 field layout")
+
+    raw_data = bytes(response["data"])
+    required_size = height * row_step
+    if len(raw_data) < required_size:
+        raise RuntimeError(
+            f"Truncated 3D lidar payload: expected {required_size} bytes, got {len(raw_data)}"
+        )
+
+    byte_order = ">" if is_bigendian else "<"
+    dtype = np.dtype({
+        "names": ["x", "y", "z", "intensity", "ring", "return_type", "valid", "time_offset_ns"],
+        "formats": [
+            byte_order + "f4", byte_order + "f4", byte_order + "f4", byte_order + "f4",
+            byte_order + "u2", "u1", "u1", byte_order + "u4",
+        ],
+        "offsets": [0, 4, 8, 12, 16, 18, 19, 20],
+        "itemsize": point_step,
+    })
+    records = np.ndarray(
+        shape=(height, width),
+        dtype=dtype,
+        buffer=raw_data,
+        strides=(row_step, point_step),
+    )
+    points = np.stack((records["x"], records["y"], records["z"]), axis=-1)
+    frame_id = response["frame_id"]
+    if isinstance(frame_id, bytes):
+        frame_id = frame_id.decode("utf-8")
+    sensor_position_body = np.asarray(
+        response.get("sensor_position_body", (0.0, 0.0, 0.0)), dtype=np.float64
+    )
+    sensor_orientation_body = np.asarray(
+        response.get("sensor_orientation_body", (0.0, 0.0, 0.0, 1.0)), dtype=np.float64
+    )
+    if sensor_position_body.shape != (3,) or sensor_orientation_body.shape != (4,):
+        raise RuntimeError("Invalid 3D lidar mounting transform")
+    orientation_norm = np.linalg.norm(sensor_orientation_body)
+    if not np.all(np.isfinite(sensor_position_body)) or not np.isfinite(orientation_norm) or orientation_norm == 0.0:
+        raise RuntimeError("Non-finite 3D lidar mounting transform")
+    sensor_orientation_body = sensor_orientation_body / orientation_norm
+
+    return PointCloud(
+        points=points,
+        intensity=records["intensity"],
+        ring=records["ring"],
+        return_type=records["return_type"],
+        valid=records["valid"].astype(bool, copy=False),
+        time_offset_ns=records["time_offset_ns"],
+        schema_version=schema_version,
+        sensor_id=int(response["sensor_id"]),
+        sensor_position_body=sensor_position_body,
+        sensor_orientation_body=sensor_orientation_body,
+        timestamp_ns=int(response["stamp_sec"]) * 1_000_000_000 + int(response["stamp_nanosec"]),
+        sequence=int(response["sequence"]),
+        frame_id=str(frame_id),
+        scan_duration_ns=int(response["scan_duration_ns"]),
+        fields=fields,
+        is_bigendian=is_bigendian,
+        point_step=point_step,
+        row_step=row_step,
+        data=raw_data,
+        is_dense=bool(response["is_dense"]),
+        valid_point_count=int(response["valid_point_count"]),
+        acquisition_deadline_missed=bool(response["acquisition_deadline_missed"]),
+    )
 
 def post_process(image, gamma=1.0, new_size=(800, 600), saturation=1.0, contrast=1.0):
     inv_gamma = 1.0 / gamma
@@ -205,6 +402,61 @@ class SimClient():
 
         
         return laser_scan_data
+
+    def get_lidar_point_cloud(
+        self,
+        angle_below_zero: float = np.deg2rad(15.0),
+        angle_above_zero: float = np.deg2rad(15.0),
+        range_min: float = 0.1,
+        range_max: float = 100.0,
+        channel_count: int = 16,
+        points_per_channel: int = 512,
+    ) -> PointCloud:
+        """Acquire one complete organized 3D lidar scan.
+
+        Angles are positive magnitudes in radians below and above the horizontal
+        plane. The scan always covers 360 degrees horizontally. One method call
+        starts exactly one simulator scan and waits until all trace batches have
+        completed.
+
+        Returned coordinates are sensor-local metres in ROS FLU convention:
+        +X forward, +Y left, +Z up.
+        """
+        numeric_values = (
+            angle_below_zero,
+            angle_above_zero,
+            range_min,
+            range_max,
+        )
+        if not all(np.isfinite(float(value)) for value in numeric_values):
+            raise ValueError("3D lidar angles and ranges must be finite")
+        if not 0.0 <= angle_below_zero < np.pi / 2:
+            raise ValueError("angle_below_zero must be in [0, pi/2)")
+        if not 0.0 <= angle_above_zero < np.pi / 2:
+            raise ValueError("angle_above_zero must be in [0, pi/2)")
+        if range_min < 0.0 or range_max <= range_min:
+            raise ValueError("range_max must be greater than non-negative range_min")
+        if isinstance(channel_count, bool) or not isinstance(channel_count, (int, np.integer)):
+            raise TypeError("channel_count must be an integer")
+        if isinstance(points_per_channel, bool) or not isinstance(points_per_channel, (int, np.integer)):
+            raise TypeError("points_per_channel must be an integer")
+        if channel_count <= 0 or channel_count > 65_536:
+            raise ValueError("channel_count must be in [1, 65536]")
+        if points_per_channel <= 0:
+            raise ValueError("points_per_channel must be positive")
+        if channel_count * points_per_channel > 1_048_576:
+            raise ValueError("one 3D lidar scan cannot exceed 1048576 rays")
+
+        response = self.rpc_client.call(
+            "getLidarPointCloud",
+            float(angle_below_zero),
+            float(angle_above_zero),
+            float(range_min),
+            float(range_max),
+            int(channel_count),
+            int(points_per_channel),
+        )
+        return _decode_point_cloud(response)
     
     def get_radar_point(self,
                         radar_id : int = 0,
